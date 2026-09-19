@@ -16,6 +16,7 @@ import {
   ArrowRight,
   HelpCircle,
   Square,
+  Clock,
 } from 'lucide-react';
 import { ChatMessage, VideoItem } from '@/types/video';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -87,6 +88,7 @@ export function ChatPanel({
   });
   const [internalInputValue, setInternalInputValue] = useState('');
   const [internalIsLoading, setInternalIsLoading] = useState(false);
+  const [loadingStatusMessage, setLoadingStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [lastQuery, setLastQuery] = useState<string>('');
@@ -169,6 +171,7 @@ export function ChatPanel({
     abortControllerRef.current = abortController;
 
     setErrorMessage(null);
+    setLoadingStatusMessage(null);
     setLastQuery(query);
     setInputValue('');
 
@@ -225,6 +228,9 @@ export function ChatPanel({
               const parsed = JSON.parse(dataStr);
               if (parsed.error) {
                 throw new Error(parsed.error);
+              }
+              if (parsed.status === 'fallback' && parsed.statusMessage) {
+                setLoadingStatusMessage(parsed.statusMessage);
               }
               if (parsed.text) {
                 accumulatedText += parsed.text;
@@ -308,6 +314,7 @@ export function ChatPanel({
       }
     } finally {
       setIsLoading(false);
+      setLoadingStatusMessage(null);
       abortControllerRef.current = null;
       setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 100);
     }
@@ -326,6 +333,7 @@ export function ChatPanel({
     }
     setMessages([]);
     setErrorMessage(null);
+    setLoadingStatusMessage(null);
   };
 
   const quickPrompts = PRE_QUESTIONS;
@@ -461,11 +469,19 @@ export function ChatPanel({
                 ) : (
                   <div className="w-full">
                     {!msg.content && isLoading ? (
-                      <div className="flex items-center gap-2.5 py-1 text-xs text-zinc-600 dark:text-zinc-300">
-                        <Loader2 className="w-4 h-4 animate-spin text-red-600 dark:text-red-400 shrink-0" />
-                        <span className="font-medium animate-pulse">
-                          Analyzing video speech & visuals...
-                        </span>
+                      <div className="py-1 space-y-2 text-xs">
+                        <div className="flex items-center gap-2.5 text-zinc-600 dark:text-zinc-300">
+                          <Loader2 className="w-4 h-4 animate-spin text-red-600 dark:text-red-400 shrink-0" />
+                          <span className="font-medium animate-pulse">
+                            Analyzing video speech & visuals...
+                          </span>
+                        </div>
+                        {loadingStatusMessage && (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/60 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+                            <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>{loadingStatusMessage}</span>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <>

@@ -491,14 +491,15 @@ export default function VideoDetailPage() {
                   <div className="flex items-center gap-2 shrink-0">
                     <ThemeToggle id="fullscreen-theme-toggle" />
                     <button
+                      id="exit-fullscreen-btn"
                       type="button"
                       onClick={() => setIsChatFullScreen(false)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-zinc-900 dark:bg-zinc-100 hover:bg-zinc-800 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 transition-colors cursor-pointer shadow-2xs"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 active:bg-red-800 text-white transition-colors cursor-pointer shadow-xs"
                       title="Exit expanded view (Esc)"
                     >
                       <Minimize2 className="w-3.5 h-3.5" />
                       <span className="hidden sm:inline">Exit Full Screen</span>
-                      <kbd className="hidden md:inline px-1.5 py-0.2 rounded bg-zinc-800 dark:bg-zinc-200 text-zinc-300 dark:text-zinc-700 font-mono text-[10px]">
+                      <kbd className="hidden md:inline px-1.5 py-0.2 rounded bg-red-700 text-red-100 font-mono text-[10px]">
                         Esc
                       </kbd>
                     </button>
@@ -641,13 +642,7 @@ export default function VideoDetailPage() {
                   )}
 
                   {activeTab === 'flashcards' && (
-                    <div
-                      className={
-                        isChatFullScreen
-                          ? 'flex-1 flex flex-col min-h-0 max-w-4xl w-full mx-auto p-3 sm:p-6 overflow-hidden'
-                          : 'flex-1 flex flex-col overflow-hidden'
-                      }
-                    >
+                    <div className="flex-1 flex flex-col min-h-0 w-full h-full overflow-hidden">
                       <FlashcardDeck
                         videoId={videoId}
                         video={video}
@@ -658,13 +653,7 @@ export default function VideoDetailPage() {
                   )}
 
                   {activeTab === 'slides' && (
-                    <div
-                      className={
-                        isChatFullScreen
-                          ? 'flex-1 flex flex-col min-h-0 max-w-5xl w-full mx-auto p-3 sm:p-6 overflow-hidden'
-                          : 'flex-1 flex flex-col overflow-hidden'
-                      }
-                    >
+                    <div className="flex-1 flex flex-col min-h-0 w-full h-full overflow-hidden">
                       <SlideViewer
                         videoId={videoId}
                         video={video}
@@ -675,13 +664,7 @@ export default function VideoDetailPage() {
                   )}
 
                   {activeTab === 'quiz' && (
-                    <div
-                      className={
-                        isChatFullScreen
-                          ? 'flex-1 flex flex-col min-h-0 max-w-4xl w-full mx-auto p-3 sm:p-6 overflow-hidden'
-                          : 'flex-1 flex flex-col overflow-hidden'
-                      }
-                    >
+                    <div className="flex-1 flex flex-col min-h-0 w-full h-full overflow-hidden">
                       <QuizPanel
                         videoId={videoId}
                         video={video}

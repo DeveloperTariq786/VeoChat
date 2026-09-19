@@ -157,16 +157,18 @@ export function SlideViewer({
   const currentSlide = slides[currentSlideIndex];
 
   return (
-    <div id="slide-viewer-root" className="flex flex-col h-full">
-      {/* Top Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-900/50 text-xs">
+    <div id="slide-viewer-root" className="flex flex-col h-full w-full overflow-hidden bg-white dark:bg-zinc-900">
+      {/* Top Header - Full width matching ChatPanel */}
+      <div className="h-11 flex items-center justify-between px-3.5 sm:px-4 border-b border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/40 text-xs shrink-0 w-full">
         <div className="flex items-center gap-2">
-          <Presentation className="w-4 h-4 text-red-600 dark:text-red-400" />
-          <span className="font-semibold text-neutral-800 dark:text-neutral-200">
-            Summary Deck
+          <div className="w-6 h-6 rounded-lg bg-red-600/10 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+            <Presentation className="w-3.5 h-3.5" />
+          </div>
+          <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">
+            Slides
           </span>
           {slides.length > 0 && (
-            <span className="text-neutral-500 font-mono text-[11px]">
+            <span className="text-zinc-500 dark:text-zinc-400 font-mono text-[11px]">
               ({currentSlideIndex + 1}/{slides.length})
             </span>
           )}
@@ -177,10 +179,10 @@ export function SlideViewer({
             <button
               type="button"
               onClick={() => setIsGridView(!isGridView)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-colors cursor-pointer ${
                 isGridView
-                  ? 'bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-white font-medium'
-                  : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/60 dark:hover:bg-neutral-800'
+                  ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-white font-medium'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
               }`}
               title={isGridView ? 'Deck view' : 'Grid overview'}
             >
@@ -191,7 +193,7 @@ export function SlideViewer({
             <button
               type="button"
               onClick={handleCopyOutline}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/60 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
               title="Copy slide deck outline"
             >
               {copied ? (
@@ -206,7 +208,7 @@ export function SlideViewer({
               type="button"
               onClick={() => handleGenerateSlides(true)}
               disabled={isLoading}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200/60 dark:hover:bg-neutral-800 transition-colors cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-50"
               title="Regenerate presentation slides"
             >
               <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
@@ -217,13 +219,14 @@ export function SlideViewer({
       </div>
 
       {/* Main Slide Body */}
-      <div className="flex-1 overflow-y-auto p-4 flex flex-col justify-between scrollbar-thin min-h-0">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col items-center scrollbar-thin min-h-0">
+        <div className="max-w-3xl w-full flex-1 flex flex-col justify-between">
         {errorMessage && (
           <div className="mb-4 flex items-start gap-2 p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300">
             <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
             <div className="flex-1">
               <p className="font-semibold">Slide Generation Failed</p>
-              <p className="text-neutral-600 dark:text-neutral-400 mt-0.5">{errorMessage}</p>
+              <p className="text-zinc-600 dark:text-zinc-400 mt-0.5">{errorMessage}</p>
             </div>
             <button
               type="button"
@@ -237,37 +240,34 @@ export function SlideViewer({
 
         {/* Empty State */}
         {slides.length === 0 && !isLoading && (
-          <div className="flex flex-col items-center justify-center text-center py-12 px-4 my-auto">
-            <div className="w-12 h-12 rounded-2xl bg-red-50 dark:bg-red-950/50 flex items-center justify-center text-red-600 dark:text-red-400 mb-3.5 border border-red-200 dark:border-red-900/50 shadow-sm">
-              <Presentation className="w-6 h-6" />
+          <div className="flex flex-col items-center justify-center text-center py-10 px-4 my-auto">
+            <div className="w-10 h-10 rounded-2xl bg-red-50 dark:bg-red-950/50 flex items-center justify-center text-red-600 dark:text-red-400 mb-3 border border-red-200 dark:border-red-900/50 shadow-2xs">
+              <Presentation className="w-5 h-5" />
             </div>
-            <h3 className="text-base font-semibold text-neutral-900 dark:text-neutral-100 mb-1">
-              Generate Presentation Slide Deck
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
+              Slides
             </h3>
-            <p className="text-xs text-neutral-600 dark:text-neutral-400 max-w-md mb-5 leading-relaxed">
-              Gemini analyzes the structure and sections of the video to create a clean, executive presentation deck outline with key takeaways.
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mb-4">
+              Overview slides and key takeaways from this video.
             </p>
             <button
               id="generate-slides-btn"
               type="button"
               onClick={() => handleGenerateSlides(false)}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs md:text-sm font-semibold shadow-sm transition-all hover:shadow-md cursor-pointer"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-2xs transition-all cursor-pointer"
             >
-              <Sparkles className="w-4 h-4" />
-              <span>Generate Slides with Gemini</span>
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Generate Slides</span>
             </button>
           </div>
         )}
 
         {/* Loading Spinner */}
         {isLoading && (
-          <div className="flex flex-col items-center justify-center py-16 text-center my-auto">
-            <Loader2 className="w-8 h-8 animate-spin text-red-600 dark:text-red-400 mb-3" />
-            <p className="text-sm font-semibold text-neutral-900 dark:text-white">
-              Structuring presentation deck from video...
-            </p>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1 max-w-sm">
-              Synthesizing slide headlines, high-impact bullet points, and key takeaways.
+          <div className="flex flex-col items-center justify-center py-14 text-center my-auto">
+            <Loader2 className="w-7 h-7 animate-spin text-red-600 dark:text-red-400 mb-2.5" />
+            <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+              Generating Slides...
             </p>
           </div>
         )}
@@ -402,6 +402,7 @@ export function SlideViewer({
             </div>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

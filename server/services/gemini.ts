@@ -598,6 +598,12 @@ Please provide a helpful, grounded response with [MM:SS] timestamp references wh
 
   // Attempt 2: Metadata-grounded text streaming
   if (!streamSucceeded) {
+    // Notify the client that live video model is busy and we are switching to fallback
+    yield {
+      status: 'fallback',
+      statusMessage: 'API is overloaded, responses may take longer',
+    };
+
     const fallbackPrompt = `Video Title: "${meta?.title || cleanId}"
 Channel: "${meta?.channel || 'YouTube'}"
 Duration: ${meta?.duration || 'Unknown'}

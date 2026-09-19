@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ExternalResourceItem, ExternalResourcesApiResponse } from '@/types/video';
 import {
   Globe,
@@ -10,7 +10,6 @@ import {
   ExternalLink,
   Copy,
   Check,
-  Search,
   RefreshCw,
   Sparkles,
   AlertCircle,
@@ -26,8 +25,6 @@ interface ExternalResourcesPanelProps {
   onResourcesLoaded?: (count: number) => void;
 }
 
-type ResourceCategoryFilter = 'all' | 'article' | 'documentation' | 'tutorial' | 'reference' | 'tool' | 'video';
-
 export function ExternalResourcesPanel({
   videoId,
   video,
@@ -37,8 +34,6 @@ export function ExternalResourcesPanel({
   const [topic, setTopic] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [activeCategory, setActiveCategory] = useState<ResourceCategoryFilter>('all');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const fetchResources = useCallback(async (isRefresh = false) => {
@@ -155,117 +150,38 @@ export function ExternalResourcesPanel({
     }
   };
 
-  const filteredResources = useMemo(() => {
-    return resources.filter((item) => {
-      // Category filter
-      if (activeCategory !== 'all' && item.category !== activeCategory) {
-        return false;
-      }
-
-      // Search query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchesQuery =
-          item.title.toLowerCase().includes(q) ||
-          item.snippet.toLowerCase().includes(q) ||
-          (item.domain && item.domain.toLowerCase().includes(q)) ||
-          (item.source && item.source.toLowerCase().includes(q));
-        if (!matchesQuery) return false;
-      }
-
-      return true;
-    });
-  }, [resources, activeCategory, searchQuery]);
-
-  const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: resources.length };
-    resources.forEach((r) => {
-      counts[r.category] = (counts[r.category] || 0) + 1;
-    });
-    return counts;
-  }, [resources]);
-
   return (
     <div id="external-resources-panel" className="flex-1 flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
       {/* Header Controls */}
-      <div className="p-3 sm:p-4 border-b border-zinc-200/80 dark:border-zinc-800 flex flex-col gap-3 bg-zinc-50/50 dark:bg-zinc-950/30">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
-              <Globe className="w-4 h-4" />
-            </div>
-            <div className="min-w-0">
-              <h3 className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 truncate">
-                <span>External Links & Resources</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-semibold">
-                  Google & Web
-                </span>
-              </h3>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
-                {topic ? `Browser links & documentation for "${topic}"` : 'Curated articles, docs & web resources'}
-              </p>
-            </div>
+      <div className="p-3 sm:p-4 border-b border-zinc-200/80 dark:border-zinc-800 flex items-center justify-between gap-3 bg-zinc-50/50 dark:bg-zinc-950/30">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-blue-600/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+            <Globe className="w-4 h-4" />
           </div>
-
-          <button
-            id="refresh-resources-btn"
-            type="button"
-            onClick={() => fetchResources(true)}
-            disabled={isLoading}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-50 shrink-0 border border-zinc-200/80 dark:border-zinc-700/80"
-            title="Refresh Web Resources"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-        </div>
-
-        {/* Search and Category Filters */}
-        <div className="flex flex-col gap-2">
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              id="resources-search-input"
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search articles, documentation, tutorials..."
-              className="w-full pl-8.5 pr-3 py-1.5 text-xs rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:ring-1.5 focus:ring-blue-500"
-            />
-          </div>
-
-          {/* Category Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
-            {[
-              { id: 'all', label: 'All Resources' },
-              { id: 'article', label: 'Articles' },
-              { id: 'documentation', label: 'Documentation' },
-              { id: 'tutorial', label: 'Tutorials' },
-              { id: 'reference', label: 'References' },
-              { id: 'video', label: 'Playlists/Videos' },
-              { id: 'tool', label: 'Tools' },
-            ].map((cat) => {
-              const count = categoryCounts[cat.id] || 0;
-              if (cat.id !== 'all' && count === 0) return null;
-              const isActive = activeCategory === cat.id;
-
-              return (
-                <button
-                  key={cat.id}
-                  type="button"
-                  onClick={() => setActiveCategory(cat.id as ResourceCategoryFilter)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-medium whitespace-nowrap transition-colors cursor-pointer border ${
-                    isActive
-                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-2xs font-semibold'
-                      : 'bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 border-zinc-200/80 dark:border-zinc-800'
-                  }`}
-                >
-                  {cat.label} {count > 0 && <span className="opacity-70 text-[10px]">({count})</span>}
-                </button>
-              );
-            })}
+          <div className="min-w-0">
+            <h3 className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 truncate">
+              <span>External Links & Resources</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-semibold">
+                Google & Web
+              </span>
+            </h3>
+            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+              {topic ? `Browser links & documentation for "${topic}"` : 'Curated articles, docs & web resources'}
+            </p>
           </div>
         </div>
+
+        <button
+          id="refresh-resources-btn"
+          type="button"
+          onClick={() => fetchResources(true)}
+          disabled={isLoading}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200/70 dark:hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-50 shrink-0 border border-zinc-200/80 dark:border-zinc-700/80"
+          title="Refresh Web Resources"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          <span className="hidden sm:inline">Refresh</span>
+        </button>
       </div>
 
       {/* Main Content Area */}
@@ -300,29 +216,24 @@ export function ExternalResourcesPanel({
               Retry
             </button>
           </div>
-        ) : filteredResources.length === 0 ? (
+        ) : resources.length === 0 ? (
           <div className="p-8 text-center rounded-2xl bg-zinc-50 dark:bg-zinc-850 border border-zinc-200/80 dark:border-zinc-800">
             <Globe className="w-8 h-8 text-zinc-400 mx-auto mb-2 opacity-60" />
-            <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">No matching external resources found</p>
+            <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">No external resources found</p>
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-              Try adjusting your search query or switching categories.
+              Click refresh to discover online references and articles for this video.
             </p>
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  setActiveCategory('all');
-                }}
-                className="mt-3 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:opacity-90 transition-opacity cursor-pointer"
-              >
-                Clear Filters
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => fetchResources(true)}
+              className="mt-3 px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors cursor-pointer"
+            >
+              Discover Resources
+            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3.5">
-            {filteredResources.map((item) => {
+            {resources.map((item) => {
               const catBadge = getCategoryBadge(item.category);
               const CatIcon = catBadge.icon;
               const isCopied = copiedId === item.id;
