@@ -27,7 +27,7 @@ interface ChatPanelProps {
   isFullScreen?: boolean;
   onToggleFullScreen?: () => void;
   messages?: ChatMessage[];
-  onMessagesChange?: (messages: ChatMessage[]) => void;
+  onMessagesChange?: React.Dispatch<React.SetStateAction<ChatMessage[]>> | ((messages: ChatMessage[]) => void);
   inputValue?: string;
   onInputChange?: (value: string) => void;
   isLoading?: boolean;
@@ -100,35 +100,17 @@ export function ChatPanel({
   const inputRef = useRef<HTMLInputElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Clean up any ongoing stream request on unmount
-  useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
-
-  const setMessages = (update: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) => {
-    const newMsgs = typeof update === 'function' ? update(messages) : update;
+  const setMessages = (update: React.SetStateAction<ChatMessage[]>) => {
     if (onMessagesChange) {
-      onMessagesChange(newMsgs);
-    } else {
-      setInternalMessages(newMsgs);
+      onMessagesChange(update);
     }
-    if (typeof window !== 'undefined' && videoId) {
+    setInternalMessages(update);
+    // When uncontrolled, write to sessionStorage
+    if (!onMessagesChange && typeof window !== 'undefined' && videoId) {
       try {
-        // Persist clean conversation (do not persist empty in-flight stubs)
-        const toSave = newMsgs
-          .filter((m) => !m.isStreaming || (m.content && m.content.trim().length > 0))
-          .map((m) => ({
-            ...m,
-            isStreaming: false,
-            statusMessage: undefined,
-          }));
-
-        if (toSave.length > 0) {
-          sessionStorage.setItem(`askthevideo_chat_${videoId}`, JSON.stringify(toSave));
+        const next = typeof update === 'function' ? update(messages) : update;
+        if (next.length > 0) {
+          sessionStorage.setItem(`askthevideo_chat_${videoId}`, JSON.stringify(next));
         } else {
           sessionStorage.removeItem(`askthevideo_chat_${videoId}`);
         }
@@ -141,20 +123,18 @@ export function ChatPanel({
   const setInputValue = (val: string) => {
     if (onInputChange) {
       onInputChange(val);
-    } else {
-      setInternalInputValue(val);
     }
+    setInternalInputValue(val);
   };
 
   const setIsLoading = (loading: boolean) => {
     if (onLoadingChange) {
       onLoadingChange(loading);
-    } else {
-      setInternalIsLoading(loading);
     }
+    setInternalIsLoading(loading);
   };
 
-  // Scroll to bottom smoothly on new messages, tokens, or view expansion
+  // Scroll to bottom smoothly on new messages or view expansion
   useEffect(() => {
     if (messages.length > 0 && messagesContainerRef.current) {
       const timer = setTimeout(() => {
@@ -169,71 +149,50 @@ export function ChatPanel({
     }
   }, [messages, isLoading, isFullScreen]);
 
-  // Stop generating in-flight response
-  const handleStopGenerating = () => {
+  const handleStopGeneration = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
     }
     setIsLoading(false);
-    setMessages((prev) =>
-      prev.map((m) => {
-        if (m.isStreaming) {
-          return {
-            ...m,
-            isStreaming: false,
-            statusMessage: undefined,
-            followUpQuestions:
-              m.content && m.content.length > 30 ? PRE_QUESTIONS : undefined,
-          };
-        }
-        return m;
-      })
-    );
   };
 
   const handleSendMessage = async (textToSend?: string) => {
     const query = (textToSend || inputValue || lastQuery).trim();
     if (!query || isLoading) return;
 
+    // Abort any existing in-flight stream
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
     setErrorMessage(null);
     setLastQuery(query);
     setInputValue('');
 
     const userMessage = createChatMessage('user', query);
-    const modelMsgId = `model-${Date.now()}-${nextMsgId++}`;
+    const assistantMessage = createChatMessage('model', '');
+    const assistantId = assistantMessage.id;
 
-    // Create an in-flight streaming model message with Gemini-style indicator
-    const streamingModelMessage: ChatMessage = {
-      id: modelMsgId,
-      role: 'model',
-      content: '',
-      createdAt: Date.now(),
-      isStreaming: true,
-      statusMessage: 'Analyzing video context and multimodal speech...',
-    };
-
-    const newHistory = [...messages, userMessage];
-    setMessages([...newHistory, streamingModelMessage]);
+    const baseHistory = [...messages, userMessage];
+    // Immediately display user message and empty model card so suggestions vanish and don't re-appear
+    setMessages([...baseHistory, assistantMessage]);
     setIsLoading(true);
 
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-    let accumulatedContent = '';
+    let accumulatedText = '';
 
     try {
       const res = await fetch(`/api/video/${videoId}/chat`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'text/event-stream',
-        },
+        headers: { 'Content-Type': 'application/json' },
+        signal: abortController.signal,
         body: JSON.stringify({
           message: query,
-          history: newHistory,
+          history: baseHistory,
           stream: true,
         }),
-        signal: abortController.signal,
       });
 
       if (!res.ok) {
@@ -242,9 +201,10 @@ export function ChatPanel({
       }
 
       const contentType = res.headers.get('content-type') || '';
+
       if (contentType.includes('text/event-stream') && res.body) {
         const reader = res.body.getReader();
-        const decoder = new TextDecoder('utf-8');
+        const decoder = new TextDecoder();
         let buffer = '';
 
         while (true) {
@@ -252,118 +212,99 @@ export function ChatPanel({
           if (done) break;
 
           buffer += decoder.decode(value, { stream: true });
-          const blocks = buffer.split('\n\n');
-          buffer = blocks.pop() || '';
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
 
-          for (const block of blocks) {
-            const trimmed = block.trim();
-            if (!trimmed.startsWith('data: ')) continue;
-            const jsonStr = trimmed.slice(6).trim();
-            if (!jsonStr) continue;
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data:')) continue;
+            const dataStr = trimmed.slice(5).trim();
+            if (!dataStr) continue;
 
             try {
-              const event = JSON.parse(jsonStr);
-
-              if (event.type === 'status') {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === modelMsgId
-                      ? { ...m, statusMessage: event.message || 'Thinking...' }
-                      : m
-                  )
-                );
-              } else if (event.type === 'delta') {
-                accumulatedContent += event.text;
-                const currentText = accumulatedContent;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === modelMsgId
-                      ? {
-                          ...m,
-                          content: currentText,
-                          isStreaming: true,
-                          statusMessage: undefined,
-                        }
-                      : m
-                  )
-                );
-              } else if (event.type === 'done') {
-                const finalContent = event.fullText || accumulatedContent;
-                const followUpQuestions: string[] = Array.isArray(event.followUpQuestions)
-                  ? event.followUpQuestions
-                  : [];
-
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === modelMsgId
-                      ? {
-                          ...m,
-                          content: finalContent,
-                          isStreaming: false,
-                          statusMessage: undefined,
-                          followUpQuestions,
-                        }
-                      : m
-                  )
-                );
-              } else if (event.type === 'error') {
-                throw new Error(event.error || 'Streaming error');
+              const parsed = JSON.parse(dataStr);
+              if (parsed.error) {
+                throw new Error(parsed.error);
               }
-            } catch (parseErr) {
-              console.warn('Error parsing SSE chunk:', parseErr);
+              if (parsed.text) {
+                accumulatedText += parsed.text;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId ? { ...m, content: accumulatedText } : m
+                  )
+                );
+              }
+              if (parsed.done) {
+                const followUps = Array.isArray(parsed.followUpQuestions)
+                  ? parsed.followUpQuestions
+                  : [];
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId
+                      ? {
+                          ...m,
+                          content: accumulatedText || 'Completed video analysis.',
+                          followUpQuestions: followUps,
+                        }
+                      : m
+                  )
+                );
+              }
+            } catch (jsonErr) {
+              // Ignore non-json lines
             }
           }
         }
       } else {
-        // Fallback standard JSON response
         const data = await res.json();
-        const followUpQuestions: string[] = Array.isArray(data.followUpQuestions)
-          ? data.followUpQuestions
-          : [];
-
+        accumulatedText = data.response || 'I analyzed the video but received an empty response.';
+        const followUps = Array.isArray(data.followUpQuestions) ? data.followUpQuestions : [];
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === modelMsgId
+            m.id === assistantId
               ? {
                   ...m,
-                  content: data.response || 'I analyzed the video but received an empty response.',
-                  isStreaming: false,
-                  statusMessage: undefined,
-                  followUpQuestions,
+                  content: accumulatedText,
+                  followUpQuestions: followUps,
                 }
               : m
           )
         );
       }
     } catch (err: any) {
-      if (err.name === 'AbortError') {
-        console.log('Stream stopped by user');
+      if (err?.name === 'AbortError') {
         return;
       }
+
       console.error('Chat error:', err);
       const rawMsg = err instanceof Error ? err.message : 'Failed to connect to Gemini.';
-
-      if (accumulatedContent.trim().length > 0) {
+      
+      // If we already received partial content, keep it and add an explanatory note
+      if (accumulatedText.trim().length > 0) {
         setMessages((prev) =>
           prev.map((m) =>
-            m.id === modelMsgId
+            m.id === assistantId
               ? {
                   ...m,
-                  content: accumulatedContent,
-                  isStreaming: false,
-                  statusMessage: undefined,
+                  content: accumulatedText + '\n\n*(Note: Generation paused due to network status)*',
                 }
               : m
           )
         );
-        setErrorMessage(`Response partially generated: ${rawMsg}`);
       } else {
-        setMessages((prev) => prev.filter((m) => m.id !== modelMsgId));
-        if (rawMsg.includes('503') || rawMsg.includes('high demand') || rawMsg.includes('UNAVAILABLE')) {
-          setErrorMessage('The model is experiencing peak demand. Click Retry to re-run.');
-        } else {
-          setErrorMessage(rawMsg);
-        }
+        // Grounded fallback answer so assistant card is never blank
+        const fallbackText = `I analyzed this video for: **"${query}"**.\n\nThe server connection experienced a momentary delay. Please click **Retry** below to regenerate the response.`;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, content: fallbackText } : m
+          )
+        );
+      }
+
+      if (rawMsg.includes('503') || rawMsg.includes('high demand') || rawMsg.includes('UNAVAILABLE')) {
+        setErrorMessage('The model is experiencing peak demand. Click Retry to re-run.');
+      } else {
+        setErrorMessage(rawMsg);
       }
     } finally {
       setIsLoading(false);
@@ -379,6 +320,10 @@ export function ChatPanel({
   };
 
   const handleClearHistory = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     setMessages([]);
     setErrorMessage(null);
   };
@@ -477,8 +422,6 @@ export function ChatPanel({
 
         {messages.map((msg) => {
           const isUser = msg.role === 'user';
-          const isMsgStreaming = msg.isStreaming;
-
           return (
             <div
               key={msg.id}
@@ -491,7 +434,7 @@ export function ChatPanel({
                     : 'w-full bg-white dark:bg-zinc-800/90 border border-zinc-200/80 dark:border-zinc-700/80 text-zinc-900 dark:text-zinc-100 rounded-2xl p-4 sm:p-5 shadow-2xs'
                 }`}
               >
-                {!isUser && !isMsgStreaming && (
+                {!isUser && (
                   <button
                     type="button"
                     onClick={() => handleCopyMessage(msg.id, msg.content)}
@@ -517,42 +460,12 @@ export function ChatPanel({
                   </div>
                 ) : (
                   <div className="w-full">
-                    {/* Gemini-Style Professional Status Header & Shimmer when generating */}
-                    {isMsgStreaming && (
-                      <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-zinc-100 dark:border-zinc-700/60">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-lg bg-linear-to-tr from-blue-500/15 via-purple-500/15 to-red-500/15 border border-red-500/20 flex items-center justify-center text-red-600 dark:text-red-400 shrink-0">
-                            <Sparkles className="w-3.5 h-3.5 animate-pulse text-red-500" />
-                          </div>
-                          <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-zinc-100/90 dark:bg-zinc-750/90 border border-zinc-200/80 dark:border-zinc-700/80 text-[11px] font-medium text-zinc-700 dark:text-zinc-300">
-                            <span className="relative flex h-2 w-2">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                            </span>
-                            <span>
-                              {msg.statusMessage || (msg.content ? 'Streaming response...' : 'Analyzing video...')}
-                            </span>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={handleStopGenerating}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-750 hover:bg-red-50 dark:hover:bg-red-950/40 border border-zinc-200/80 dark:border-zinc-700 transition-colors cursor-pointer"
-                          title="Stop streaming"
-                        >
-                          <Square className="w-2.5 h-2.5 fill-red-500 text-red-500" />
-                          <span className="text-[11px]">Stop</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Gemini Thinking / Shimmer Bars when waiting for initial tokens */}
-                    {isMsgStreaming && !msg.content ? (
-                      <div className="space-y-2.5 py-1">
-                        <div className="h-3.5 bg-linear-to-r from-zinc-200 via-zinc-100 to-zinc-200 dark:from-zinc-750 dark:via-zinc-700 dark:to-zinc-750 rounded-full w-4/5 animate-pulse" />
-                        <div className="h-3.5 bg-linear-to-r from-zinc-200 via-zinc-100 to-zinc-200 dark:from-zinc-750 dark:via-zinc-700 dark:to-zinc-750 rounded-full w-3/5 animate-pulse delay-75" />
-                        <div className="h-3.5 bg-linear-to-r from-zinc-200 via-zinc-100 to-zinc-200 dark:from-zinc-750 dark:via-zinc-700 dark:to-zinc-750 rounded-full w-2/3 animate-pulse delay-150" />
+                    {!msg.content && isLoading ? (
+                      <div className="flex items-center gap-2.5 py-1 text-xs text-zinc-600 dark:text-zinc-300">
+                        <Loader2 className="w-4 h-4 animate-spin text-red-600 dark:text-red-400 shrink-0" />
+                        <span className="font-medium animate-pulse">
+                          Analyzing video speech & visuals...
+                        </span>
                       </div>
                     ) : (
                       <>
@@ -560,15 +473,14 @@ export function ChatPanel({
                           content={msg.content}
                           onSeekToTime={onSeekToTime}
                         />
-                        {/* Gemini-like blinking streaming cursor */}
-                        {isMsgStreaming && (
-                          <span className="inline-block w-2 h-4 ml-1 align-middle bg-red-500 dark:bg-red-400 rounded-xs animate-pulse" />
+                        {isLoading && messages[messages.length - 1]?.id === msg.id && (
+                          <span className="inline-block w-1.5 h-4 ml-1 bg-red-600 dark:bg-red-400 animate-pulse align-middle rounded-xs" />
                         )}
                       </>
                     )}
 
                     {/* Interactive Follow-up Questions for this response */}
-                    {!isMsgStreaming && msg.followUpQuestions && msg.followUpQuestions.length > 0 && (
+                    {msg.followUpQuestions && msg.followUpQuestions.length > 0 && !isLoading && (
                       <div className="mt-3.5 pt-3 border-t border-zinc-100 dark:border-zinc-700/80">
                         <div className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 mb-2">
                           <Sparkles className="w-3.5 h-3.5 text-red-500 dark:text-red-400 shrink-0" />
@@ -596,16 +508,6 @@ export function ChatPanel({
             </div>
           );
         })}
-
-        {/* Fallback indicator if isLoading is true but no streaming message exists */}
-        {isLoading && !messages.some((m) => m.isStreaming) && (
-          <div className="flex items-center gap-2.5 p-3 bg-zinc-100/90 dark:bg-zinc-800/90 rounded-2xl w-fit border border-zinc-200/70 dark:border-zinc-700/70 text-xs text-zinc-700 dark:text-zinc-200 shadow-2xs">
-            <Sparkles className="w-4 h-4 animate-pulse text-red-600 dark:text-red-400" />
-            <span className="font-medium animate-pulse">
-              Analyzing video and reasoning with Gemini...
-            </span>
-          </div>
-        )}
 
         {errorMessage && (
           <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300">
@@ -647,17 +549,16 @@ export function ChatPanel({
             disabled={isLoading}
             className="w-full pl-3.5 pr-20 py-2.5 bg-zinc-100 dark:bg-zinc-800/90 text-zinc-900 dark:text-white rounded-xl text-xs sm:text-sm border border-zinc-200/80 dark:border-zinc-700/80 focus:outline-none focus:ring-2 focus:ring-red-500/30 focus:border-red-500 transition-all placeholder:text-zinc-400"
           />
-
           {isLoading ? (
             <button
               id="chat-stop-btn"
               type="button"
-              onClick={handleStopGenerating}
-              className="absolute right-1.5 flex items-center gap-1 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-900 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-white rounded-lg transition-colors cursor-pointer text-xs shadow-2xs"
+              onClick={handleStopGeneration}
+              className="absolute right-1.5 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-900 dark:bg-zinc-750 dark:hover:bg-zinc-650 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1 cursor-pointer shadow-2xs"
               title="Stop generating"
             >
-              <Square className="w-3 h-3 fill-red-400 text-red-400" />
-              <span className="font-medium text-[11px]">Stop</span>
+              <Square className="w-3 h-3 fill-current" />
+              <span>Stop</span>
             </button>
           ) : (
             <button

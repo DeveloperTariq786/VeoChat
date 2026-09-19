@@ -25,28 +25,23 @@ function getGenAI(): GoogleGenAI | null {
     return null;
   }
   if (!genAIClient) {
-    genAIClient = new GoogleGenAI({
-      apiKey: key,
-      httpOptions: {
-        headers: {
-          'User-Agent': 'aistudio-build',
-        },
-      },
-    });
+    genAIClient = new GoogleGenAI({ apiKey: key });
   }
   return genAIClient;
 }
 
 /**
  * Model hierarchy for free-tier resilience:
- * 1. Primary: gemini-3.8-flash (fast multimodal video intelligence)
- * 2. Fallback 1: gemini-3.1-flash-lite (high throughput, resilient to quota spikes)
- * 3. Fallback 2: gemini-flash-latest (latest stable flash alias)
+ * 1. Primary: gemini-3.1-flash-lite (ultra-fast, high quota, native multimodal YouTube fileData support)
+ * 2. Fallback 1: gemini-flash-latest (latest stable flash alias)
+ * 3. Fallback 2: gemini-2.5-flash (reliable secondary flash)
+ * 4. Fallback 3: gemini-3.8-flash (advanced multimodal)
  */
-export const PRIMARY_MODEL = 'gemini-3.8-flash';
+export const PRIMARY_MODEL = 'gemini-3.1-flash-lite';
 export const FALLBACK_MODELS = [
-  'gemini-3.1-flash-lite',
   'gemini-flash-latest',
+  'gemini-2.5-flash',
+  'gemini-3.8-flash',
 ];
 
 const ALL_CANDIDATE_MODELS = [PRIMARY_MODEL, ...FALLBACK_MODELS];
@@ -236,252 +231,6 @@ function extractResponseAndFollowUps(
   return { cleanedResponse, followUpQuestions };
 }
 
-export type ChatStreamEvent =
-  | { type: 'status'; message: string; stage?: 'thinking' | 'analyzing' | 'generating' }
-  | { type: 'delta'; text: string }
-  | { type: 'done'; fullText: string; followUpQuestions: string[]; model: string }
-  | { type: 'error'; error: string };
-
-/**
- * 1b. Stream Chat with Video (Real-time token streaming with Gemini-style stages)
- * Yields SSE stream events: status, delta tokens, done with follow-ups, or error.
- */
-export async function* streamChatWithVideo(
-  videoId: string,
-  userMessage: string,
-  history: ChatMessage[] = [],
-  videoMetadata?: VideoItem | null
-): AsyncGenerator<ChatStreamEvent, void, unknown> {
-  const cleanId = extractYouTubeId(videoId);
-  const meta = videoMetadata || (await getVideoById(cleanId));
-  const ai = getGenAI();
-
-  yield {
-    type: 'status',
-    stage: 'analyzing',
-    message: 'Analyzing video context and multimodal audio...',
-  };
-
-  if (!ai) {
-    // High-quality simulated streaming response if GEMINI_API_KEY is not configured
-    const simulatedResponse = generateSimulatedChatResponse(userMessage, meta, cleanId);
-    const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
-      simulatedResponse,
-      userMessage,
-      meta
-    );
-
-    yield {
-      type: 'status',
-      stage: 'generating',
-      message: 'Generating response...',
-    };
-
-    const words = cleanedResponse.split(' ');
-    let chunk = '';
-    for (let i = 0; i < words.length; i++) {
-      chunk += (i === 0 ? '' : ' ') + words[i];
-      if (i % 3 === 0 || i === words.length - 1) {
-        yield { type: 'delta', text: chunk };
-        chunk = '';
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-    }
-
-    yield {
-      type: 'done',
-      fullText: cleanedResponse,
-      followUpQuestions,
-      model: 'simulated (configure GEMINI_API_KEY in Settings for live model)',
-    };
-    return;
-  }
-
-  const systemInstruction = `You are VeoChat AI, an expert video analyst powered by Gemini multimodal video intelligence.
-You are directly analyzing the YouTube video titled "${meta?.title || cleanId}" from channel "${meta?.channel || 'YouTube'}".
-Your core rules:
-1. Always ground your answers in the actual visual actions, speech, demonstrations, and on-screen text of the video.
-2. Provide explicit timestamp citations whenever referencing key ideas or moments, using the exact format [MM:SS] or [HH:MM:SS] (e.g. [02:15] or [05:40]). This allows the user's video player to seek directly to the moment.
-3. Be clear, structured, and insightful. Use bullet points and bold highlights where appropriate.
-4. If a question cannot be answered from the video, state that honestly based on the video footage.
-5. At the very end of your response, ALWAYS provide 2 or 3 concise, intriguing follow-up questions directly related to this video that the user might want to ask next based on what they just learned. Format them as:
----FOLLOW_UP_QUESTIONS---
-- [Follow-up question 1]
-- [Follow-up question 2]
-- [Follow-up question 3]`;
-
-  const conversationContext = history
-    .filter((m) => m.content && !m.isStreaming)
-    .slice(-8)
-    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
-    .join('\n\n');
-
-  const promptText = `${conversationContext ? `Conversation History:\n${conversationContext}\n\n` : ''}User Question: ${userMessage}
-
-Please provide a helpful, grounded response with [MM:SS] timestamp references where relevant, followed by 2-3 suggested follow-up questions about the video.`;
-
-  const fallbackPrompt = `Video Title: "${meta?.title || cleanId}"
-Channel: "${meta?.channel || 'YouTube'}"
-Duration: ${meta?.duration || 'Unknown'}
-Description: ${meta?.description || 'No description'}
-
-User Question: ${userMessage}
-
-Please answer the user's question as thoroughly as possible based on the video context. Include helpful timestamp references like [01:30] or [04:45] where relevant. Follow with 2-3 follow-up questions formatted after ---FOLLOW_UP_QUESTIONS---.`;
-
-  let streamResponse: any = null;
-  let usedModel = PRIMARY_MODEL;
-  const candidateModels = getPrioritizedModels(ALL_CANDIDATE_MODELS);
-  const delimiter = '---FOLLOW_UP_QUESTIONS---';
-
-  for (const modelName of candidateModels) {
-    try {
-      yield {
-        type: 'status',
-        stage: 'thinking',
-        message: 'Reasoning over video visual frames & speech...',
-      };
-
-      streamResponse = await ai.models.generateContentStream({
-        model: modelName,
-        config: {
-          systemInstruction,
-          temperature: 0.4,
-        },
-        contents: [
-          {
-            fileData: {
-              fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
-              mimeType: 'video/mp4',
-            },
-            processing: 'agentic',
-          } as any,
-          {
-            text: promptText,
-          },
-        ],
-      });
-      usedModel = modelName;
-      break;
-    } catch (directErr) {
-      console.warn(`[Gemini Chat Stream] Direct fileData failed on ${modelName}, trying metadata:`, directErr);
-      try {
-        yield {
-          type: 'status',
-          stage: 'analyzing',
-          message: 'Synthesizing video intelligence & timestamp references...',
-        };
-
-        streamResponse = await ai.models.generateContentStream({
-          model: modelName,
-          config: {
-            systemInstruction,
-            temperature: 0.5,
-          },
-          contents: fallbackPrompt,
-        });
-        usedModel = modelName;
-        break;
-      } catch (metaErr) {
-        console.warn(`[Gemini Chat Stream] Metadata stream failed on ${modelName}:`, metaErr);
-        const errMsg = metaErr instanceof Error ? metaErr.message : String(metaErr);
-        if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
-          markModelThrottled(modelName, 60000);
-        }
-      }
-    }
-  }
-
-  if (!streamResponse) {
-    yield {
-      type: 'status',
-      stage: 'generating',
-      message: 'Generating fallback video analysis...',
-    };
-    const simulatedResponse = generateSimulatedChatResponse(userMessage, meta, cleanId);
-    const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
-      simulatedResponse,
-      userMessage,
-      meta
-    );
-    yield {
-      type: 'delta',
-      text: cleanedResponse,
-    };
-    yield {
-      type: 'done',
-      fullText: cleanedResponse,
-      followUpQuestions,
-      model: 'fallback-cache',
-    };
-    return;
-  }
-
-  yield {
-    type: 'status',
-    stage: 'generating',
-    message: 'Streaming response...',
-  };
-
-  let accumulatedRaw = '';
-  let streamedCleanLength = 0;
-
-  try {
-    for await (const chunk of streamResponse) {
-      const text = chunk.text;
-      if (!text) continue;
-      accumulatedRaw += text;
-
-      const delimiterIndex = accumulatedRaw.indexOf(delimiter);
-      if (delimiterIndex !== -1) {
-        const textBeforeDelimiter = accumulatedRaw.slice(0, delimiterIndex);
-        if (textBeforeDelimiter.length > streamedCleanLength) {
-          const delta = textBeforeDelimiter.slice(streamedCleanLength);
-          streamedCleanLength = textBeforeDelimiter.length;
-          yield { type: 'delta', text: delta };
-        }
-      } else {
-        let safeEnd = accumulatedRaw.length;
-        for (let i = 1; i < delimiter.length; i++) {
-          if (accumulatedRaw.endsWith(delimiter.slice(0, i))) {
-            safeEnd = accumulatedRaw.length - i;
-            break;
-          }
-        }
-        if (safeEnd > streamedCleanLength) {
-          const delta = accumulatedRaw.slice(streamedCleanLength, safeEnd);
-          streamedCleanLength = safeEnd;
-          yield { type: 'delta', text: delta };
-        }
-      }
-    }
-
-    const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
-      accumulatedRaw,
-      userMessage,
-      meta
-    );
-
-    if (cleanedResponse.length > streamedCleanLength) {
-      yield { type: 'delta', text: cleanedResponse.slice(streamedCleanLength) };
-    }
-
-    yield {
-      type: 'done',
-      fullText: cleanedResponse,
-      followUpQuestions,
-      model: usedModel,
-    };
-  } catch (streamIterErr) {
-    console.error('Error during stream iteration:', streamIterErr);
-    const errorMsg =
-      streamIterErr instanceof Error
-        ? streamIterErr.message
-        : 'Stream interrupted unexpectedly.';
-    yield { type: 'error', error: errorMsg };
-  }
-}
-
 /**
  * 1. Chat with Video
  * Sends message + conversation history with direct YouTube video multimodal context to Gemini.
@@ -578,9 +327,7 @@ Please provide a helpful, grounded response with [MM:SS] timestamp references wh
                 fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
                 mimeType: 'video/mp4',
               },
-              // Enable agentic processing mode for deep multimodal video understanding
-              processing: 'agentic',
-            } as any,
+            },
             {
               text: promptText,
             },
@@ -723,6 +470,219 @@ Please answer the user's question as thoroughly as possible based on the video c
 }
 
 /**
+ * Real-time streaming chat with YouTube video.
+ * Yields text chunks as they arrive from Gemini and finalizes with followUpQuestions.
+ */
+export async function* chatWithVideoStream(
+  videoId: string,
+  userMessage: string,
+  history: ChatMessage[] = [],
+  videoMetadata?: VideoItem | null
+): AsyncGenerator<{ text?: string; followUpQuestions?: string[]; done?: boolean; error?: string }> {
+  const cleanId = extractYouTubeId(videoId);
+  const meta = videoMetadata || (await getVideoById(cleanId));
+  const ai = getGenAI();
+
+  if (!ai) {
+    const simulated = generateSimulatedChatResponse(userMessage, meta, cleanId);
+    const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
+      simulated,
+      userMessage,
+      meta
+    );
+    const words = cleanedResponse.split(' ');
+    for (let i = 0; i < words.length; i += 3) {
+      const chunk = words.slice(i, i + 3).join(' ') + (i + 3 < words.length ? ' ' : '');
+      yield { text: chunk };
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    yield { done: true, followUpQuestions };
+    return;
+  }
+
+  const systemInstruction = `You are VeoChat AI, an expert video analyst powered by Gemini multimodal video intelligence.
+You are directly analyzing the YouTube video titled "${meta?.title || cleanId}" from channel "${meta?.channel || 'YouTube'}".
+Your core rules:
+1. Always ground your answers in the actual visual actions, speech, demonstrations, and on-screen text of the video.
+2. Provide explicit timestamp citations whenever referencing key ideas or moments, using the exact format [MM:SS] or [HH:MM:SS] (e.g. [02:15] or [05:40]). This allows the user's video player to seek directly to the moment.
+3. Be clear, structured, and insightful. Use bullet points and bold highlights where appropriate.
+4. If a question cannot be answered from the video, state that honestly based on the video footage.
+5. At the very end of your response, ALWAYS provide 2 or 3 concise, intriguing follow-up questions directly related to this video that the user might want to ask next based on what they just learned. Format them as:
+---FOLLOW_UP_QUESTIONS---
+- [Follow-up question 1]
+- [Follow-up question 2]
+- [Follow-up question 3]`;
+
+  const conversationContext = history
+    .slice(-8)
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n\n');
+
+  const promptText = `${conversationContext ? `Conversation History:\n${conversationContext}\n\n` : ''}User Question: ${userMessage}
+
+Please provide a helpful, grounded response with [MM:SS] timestamp references where relevant, followed by 2-3 suggested follow-up questions about the video.`;
+
+  const modelsToTry = getPrioritizedModels(ALL_CANDIDATE_MODELS);
+  let streamSucceeded = false;
+  let accumulatedText = '';
+
+  // Attempt 1: Direct YouTube multimodal streaming
+  for (const model of modelsToTry) {
+    try {
+      const responseStream = await ai.models.generateContentStream({
+        model,
+        config: {
+          systemInstruction,
+          temperature: 0.4,
+        },
+        contents: [
+          {
+            fileData: {
+              fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
+              mimeType: 'video/mp4',
+            },
+          },
+          { text: promptText },
+        ],
+      });
+
+      let followUpBuffer = '';
+      let isCapturingFollowUps = false;
+
+      for await (const chunk of responseStream) {
+        const text = chunk.text || '';
+        if (!text) continue;
+
+        if (!isCapturingFollowUps) {
+          const combined = accumulatedText + text;
+          if (combined.includes('---FOLLOW_UP_QUESTIONS---')) {
+            isCapturingFollowUps = true;
+            const splitIdx = text.indexOf('---FOLLOW_UP_QUESTIONS---');
+            if (splitIdx !== -1) {
+              const before = text.slice(0, splitIdx);
+              followUpBuffer += text.slice(splitIdx);
+              if (before) {
+                accumulatedText += before;
+                yield { text: before };
+              }
+            } else {
+              followUpBuffer += text;
+            }
+          } else {
+            accumulatedText += text;
+            yield { text };
+          }
+        } else {
+          followUpBuffer += text;
+        }
+      }
+
+      if (accumulatedText.trim().length > 0) {
+        streamSucceeded = true;
+        const { followUpQuestions } = extractResponseAndFollowUps(
+          accumulatedText + '\n\n' + followUpBuffer,
+          userMessage,
+          meta
+        );
+        yield { done: true, followUpQuestions };
+        return;
+      }
+    } catch (err) {
+      console.warn(`[Gemini Stream Multimodal] Model "${model}" failed:`, err instanceof Error ? err.message : err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+        markModelThrottled(model, 60000);
+      }
+    }
+  }
+
+  // Attempt 2: Metadata-grounded text streaming
+  if (!streamSucceeded) {
+    const fallbackPrompt = `Video Title: "${meta?.title || cleanId}"
+Channel: "${meta?.channel || 'YouTube'}"
+Duration: ${meta?.duration || 'Unknown'}
+Description: ${meta?.description || 'No description'}
+
+User Question: ${userMessage}
+
+Please answer the user's question as thoroughly as possible based on the video context. Include helpful timestamp references like [01:30] or [04:45] where relevant. Follow with 2-3 follow-up questions formatted after ---FOLLOW_UP_QUESTIONS---.`;
+
+    const freshModels = getPrioritizedModels(ALL_CANDIDATE_MODELS);
+    for (const model of freshModels) {
+      try {
+        const responseStream = await ai.models.generateContentStream({
+          model,
+          config: {
+            systemInstruction,
+            temperature: 0.5,
+          },
+          contents: fallbackPrompt,
+        });
+
+        let followUpBuffer = '';
+        let isCapturingFollowUps = false;
+
+        for await (const chunk of responseStream) {
+          const text = chunk.text || '';
+          if (!text) continue;
+
+          if (!isCapturingFollowUps) {
+            const combined = accumulatedText + text;
+            if (combined.includes('---FOLLOW_UP_QUESTIONS---')) {
+              isCapturingFollowUps = true;
+              const splitIdx = text.indexOf('---FOLLOW_UP_QUESTIONS---');
+              if (splitIdx !== -1) {
+                const before = text.slice(0, splitIdx);
+                followUpBuffer += text.slice(splitIdx);
+                if (before) {
+                  accumulatedText += before;
+                  yield { text: before };
+                }
+              } else {
+                followUpBuffer += text;
+              }
+            } else {
+              accumulatedText += text;
+              yield { text };
+            }
+          } else {
+            followUpBuffer += text;
+          }
+        }
+
+        if (accumulatedText.trim().length > 0) {
+          streamSucceeded = true;
+          const { followUpQuestions } = extractResponseAndFollowUps(
+            accumulatedText + '\n\n' + followUpBuffer,
+            userMessage,
+            meta
+          );
+          yield { done: true, followUpQuestions };
+          return;
+        }
+      } catch (err) {
+        console.warn(`[Gemini Stream Metadata] Model "${model}" failed:`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+
+  // Attempt 3: High-quality resilient fallback answer
+  const smartAnswer = generateSimulatedChatResponse(userMessage, meta, cleanId);
+  const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
+    smartAnswer,
+    userMessage,
+    meta
+  );
+  const words = cleanedResponse.split(' ');
+  for (let i = 0; i < words.length; i += 3) {
+    const chunk = words.slice(i, i + 3).join(' ') + (i + 3 < words.length ? ' ' : '');
+    yield { text: chunk };
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  yield { done: true, followUpQuestions };
+}
+
+/**
  * 2. Generate Structured Notes
  * Generates well-organized markdown notes with headings, bullet points, definitions, and key takeaways.
  */
@@ -799,9 +759,7 @@ Format the response strictly as a JSON object with this schema:
                 fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
                 mimeType: 'video/mp4',
               },
-              // Enable agentic processing mode
-              processing: 'agentic',
-            } as any,
+            },
             {
               text: prompt,
             },
@@ -965,9 +923,7 @@ Format strictly as a JSON array of objects:
                 fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
                 mimeType: 'video/mp4',
               },
-              // Enable agentic processing mode
-              processing: 'agentic',
-            } as any,
+            },
             {
               text: prompt,
             },
@@ -1143,9 +1099,7 @@ Format strictly as a JSON array of objects:
                 fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
                 mimeType: 'video/mp4',
               },
-              // Enable agentic processing mode
-              processing: 'agentic',
-            } as any,
+            },
             {
               text: prompt,
             },
@@ -1566,9 +1520,7 @@ Requirements:
                 fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
                 mimeType: 'video/mp4',
               },
-              // Enable agentic processing mode
-              processing: 'agentic',
-            } as any,
+            },
             {
               text: quizPrompt,
             },

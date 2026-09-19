@@ -99,7 +99,7 @@ export function WorkspaceTabs({
     {
       id: 'resources',
       label: 'External Links',
-      horizontalLabel: 'External Links',
+      horizontalLabel: 'Links',
       description: 'Curated articles, documentation & web resources',
       icon: Globe,
       badge: resourceCount > 0 ? resourceCount : undefined,
@@ -110,8 +110,8 @@ export function WorkspaceTabs({
     const el = scrollRef.current;
     if (!el) return;
     const { scrollLeft, scrollWidth, clientWidth } = el;
-    setCanScrollLeft(scrollLeft > 6);
-    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 6);
+    setCanScrollLeft(scrollLeft > 4);
+    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4);
   }, []);
 
   useEffect(() => {
@@ -140,13 +140,21 @@ export function WorkspaceTabs({
     if (orientation !== 'horizontal') return;
 
     const timer = setTimeout(() => {
-      const activeEl = document.getElementById(`workspace-tab-${activeTab}`);
-      if (activeEl && scrollRef.current) {
-        activeEl.scrollIntoView({
-          behavior: 'smooth',
-          block: 'nearest',
-          inline: 'center',
-        });
+      if (scrollRef.current) {
+        const activeEl = scrollRef.current.querySelector<HTMLElement>(`#workspace-tab-${activeTab}`);
+        if (activeEl) {
+          const container = scrollRef.current;
+          const leftOffset = activeEl.offsetLeft - container.offsetLeft;
+          const rightOffset = leftOffset + activeEl.offsetWidth;
+          
+          if (leftOffset < container.scrollLeft || rightOffset > container.scrollLeft + container.clientWidth) {
+            activeEl.scrollIntoView({
+              behavior: 'smooth',
+              block: 'nearest',
+              inline: 'center',
+            });
+          }
+        }
       }
       checkScrollState();
     }, 50);
@@ -156,7 +164,7 @@ export function WorkspaceTabs({
 
   const handleScroll = (direction: 'left' | 'right') => {
     if (!scrollRef.current) return;
-    const amount = direction === 'left' ? -130 : 130;
+    const amount = direction === 'left' ? -120 : 120;
     scrollRef.current.scrollBy({ left: amount, behavior: 'smooth' });
     setTimeout(checkScrollState, 200);
   };
@@ -175,7 +183,7 @@ export function WorkspaceTabs({
           return (
             <button
               key={tab.id}
-              id={`workspace-tab-${tab.id}`}
+              id={`workspace-vtab-${tab.id}`}
               type="button"
               onClick={() => onTabChange(tab.id)}
               title={tab.description}
