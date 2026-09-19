@@ -20,8 +20,8 @@ const baseUrl =
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: dark)', color: '#09090b' },
     { media: '(prefers-color-scheme: light)', color: '#ffffff' },
+    { media: '(prefers-color-scheme: dark)', color: '#09090b' },
   ],
   width: 'device-width',
   initialScale: 1,
@@ -173,7 +173,7 @@ const jsonLdData = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`dark ${inter.className}`}>
+    <html lang="en" suppressHydrationWarning className={inter.className}>
       <head>
         <script
           type="application/ld+json"
@@ -187,14 +187,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               (function() {
                 try {
                   const stored = localStorage.getItem('askthevideo-theme');
-                  if (stored === 'light') {
-                    document.documentElement.classList.remove('dark');
-                  } else if (stored === 'dark') {
+                  if (stored === 'dark') {
                     document.documentElement.classList.add('dark');
-                  } else if (window.matchMedia('(prefers-color-scheme: light)').matches) {
-                    document.documentElement.classList.remove('dark');
                   } else {
-                    document.documentElement.classList.add('dark');
+                    document.documentElement.classList.remove('dark');
                   }
                 } catch (e) {}
               })();

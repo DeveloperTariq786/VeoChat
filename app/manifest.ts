@@ -8,8 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
       'Interactive video workspace. Chat with YouTube videos, generate flashcards, visual summary slides, comprehension quizzes, and discover curated related learning materials with timestamp grounding.',
     start_url: '/',
     display: 'standalone',
-    background_color: '#09090b',
-    theme_color: '#09090b',
+    background_color: '#ffffff',
+    theme_color: '#ffffff',
     icons: [
       {
         src: '/logo.jpeg',

@@ -18,7 +18,7 @@ function getSnapshot(): boolean {
 }
 
 function getServerSnapshot(): boolean {
-  return true;
+  return false;
 }
 
 export function ThemeToggle({ id = 'theme-toggle-btn' }: { id?: string }) {
