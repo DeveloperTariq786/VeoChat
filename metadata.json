@@ -1,0 +1,6 @@
+{
+  "name": "VeoChat",
+  "description": "Interactive video workspace. Chat with YouTube videos, generate flashcards, visual summary slides, comprehension quizzes, and discover curated related learning materials with timestamp grounding.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

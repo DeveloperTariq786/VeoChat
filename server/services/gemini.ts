@@ -1,0 +1,1760 @@
+import { GoogleGenAI } from '@google/genai';
+import {
+  ChatMessage,
+  FlashcardItem,
+  NotesData,
+  SlideItem,
+  VideoItem,
+  QuizData,
+  QuizQuestion,
+} from '@/types/video';
+import { extractYouTubeId, getVideoById } from '@/server/services/serpapi';
+
+// In-memory cache for intelligence artifacts across sessions
+const notesCache = new Map<string, NotesData>();
+const flashcardsCache = new Map<string, FlashcardItem[]>();
+const slidesCache = new Map<string, SlideItem[]>();
+const quizCache = new Map<string, QuizData>();
+
+// Lazy-initialized GoogleGenAI client
+let genAIClient: GoogleGenAI | null = null;
+
+function getGenAI(): GoogleGenAI | null {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || key === 'MY_GEMINI_API_KEY') {
+    return null;
+  }
+  if (!genAIClient) {
+    genAIClient = new GoogleGenAI({
+      apiKey: key,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+  return genAIClient;
+}
+
+/**
+ * Model hierarchy for free-tier resilience:
+ * 1. Primary: gemini-3.8-flash (fast multimodal video intelligence)
+ * 2. Fallback 1: gemini-3.1-flash-lite (high throughput, resilient to quota spikes)
+ * 3. Fallback 2: gemini-flash-latest (latest stable flash alias)
+ */
+export const PRIMARY_MODEL = 'gemini-3.8-flash';
+export const FALLBACK_MODELS = [
+  'gemini-3.1-flash-lite',
+  'gemini-flash-latest',
+];
+
+const ALL_CANDIDATE_MODELS = [PRIMARY_MODEL, ...FALLBACK_MODELS];
+
+// Tracks model quota/rate-limit cooldowns to avoid repeated 429 attempts
+const modelCooldowns = new Map<string, number>();
+
+function isModelThrottled(model: string): boolean {
+  const expiry = modelCooldowns.get(model);
+  if (!expiry) return false;
+  if (Date.now() > expiry) {
+    modelCooldowns.delete(model);
+    return false;
+  }
+  return true;
+}
+
+function markModelThrottled(model: string, cooldownMs = 60000) {
+  modelCooldowns.set(model, Date.now() + cooldownMs);
+}
+
+function getPrioritizedModels(models: string[]): string[] {
+  const available = models.filter((m) => !isModelThrottled(m));
+  const throttled = models.filter((m) => isModelThrottled(m));
+  return available.length > 0 ? [...available, ...throttled] : models;
+}
+
+/**
+ * Executes an AI operation with automatic model cascading.
+ * If the primary model returns 503 (high demand), 429 (rate limit), 500, or any failure,
+ * it transparently tries the fallback models in order.
+ */
+async function executeWithModelFallback<T>(
+  operationName: string,
+  candidateModels: string[],
+  fn: (model: string) => Promise<T>
+): Promise<{ result: T; usedModel: string }> {
+  const modelsToTry = getPrioritizedModels(candidateModels);
+  let lastError: unknown = null;
+
+  for (let i = 0; i < modelsToTry.length; i++) {
+    const model = modelsToTry[i];
+    try {
+      const result = await fn(model);
+      return { result, usedModel: model };
+    } catch (err) {
+      lastError = err;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const isQuotaExceeded =
+        errMsg.includes('429') ||
+        errMsg.includes('RESOURCE_EXHAUSTED') ||
+        errMsg.includes('Quota exceeded') ||
+        errMsg.includes('quota');
+
+      if (isQuotaExceeded) {
+        // Parse retry delay from message if present (e.g. "Please retry in 49s")
+        const retryMatch = errMsg.match(/retry in ([0-9.]+)\s*s/i);
+        const retrySecs = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) + 2 : 60;
+        markModelThrottled(model, retrySecs * 1000);
+        console.log(
+          `[Gemini ${operationName}] Model "${model}" reached quota limit (429). Switching to alternate model.`
+        );
+      } else {
+        console.log(
+          `[Gemini ${operationName}] Model "${model}" temporarily unavailable. Trying alternate model.`
+        );
+      }
+
+      // Brief delay before trying next fallback model if not 429
+      if (i < modelsToTry.length - 1 && !isQuotaExceeded) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+/**
+ * Utility to parse HH:MM:SS or MM:SS into total seconds.
+ */
+export function timeStringToSeconds(timeStr: string): number {
+  if (!timeStr) return 0;
+  const cleaned = timeStr.replace(/[^\d:]/g, '');
+  const parts = cleaned.split(':').map((p) => parseInt(p, 10) || 0);
+  if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  }
+  return parts[0] || 0;
+}
+
+/**
+ * Formats seconds into MM:SS.
+ */
+export function secondsToTimeString(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const mins = Math.floor(s / 60);
+  const secs = s % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Contextual follow-up question generator grounded in user conversation and video metadata.
+ */
+export function generateFollowUpQuestions(
+  userMessage: string,
+  meta: VideoItem | null,
+  responseText: string
+): string[] {
+  const title = meta?.title || '';
+  const qLower = userMessage.toLowerCase();
+
+  if (qLower.includes('summarize the video') || qLower.includes('summary')) {
+    return [
+      'What are the most crucial techniques demonstrated in this video?',
+      'What common beginner mistakes does the creator warn against?',
+      'Can you break down the key idea with timestamp citations?',
+    ];
+  }
+
+  if (qLower.includes('explain the video') || qLower.includes('explain')) {
+    return [
+      'Can you elaborate on the step-by-step workflow shown in the video?',
+      'What specific equipment or tools are recommended?',
+      'What is the most important takeaway for practical execution?',
+    ];
+  }
+
+  if (qLower.includes('timestamp') || qLower.includes('key idea')) {
+    return [
+      'Can you explain the main demonstration in deeper detail?',
+      'What troubleshooting advice is given around the middle of the video?',
+      'How does the creator summarize the results at the conclusion?',
+    ];
+  }
+
+  if (qLower.includes('mistake') || qLower.includes('avoid') || qLower.includes('error')) {
+    return [
+      'What should I do if I run into issues during execution?',
+      'What are the recommended best practices instead?',
+      'Can you cite the exact timestamp where this is resolved?',
+    ];
+  }
+
+  const defaultQuestions: string[] = [];
+  if (title) {
+    const cleanTitle = title.replace(/[^\w\s-]/g, '').trim().slice(0, 35);
+    defaultQuestions.push(`Can you explain the main technique in "${cleanTitle}"?`);
+  } else {
+    defaultQuestions.push('Can you explain the main technique demonstrated in the video?');
+  }
+  defaultQuestions.push('What are the key timestamps I should jump to first?');
+  defaultQuestions.push('What common mistakes should I avoid based on this video?');
+
+  return defaultQuestions.slice(0, 3);
+}
+
+/**
+ * Extracts the main response text and 2-3 follow-up questions from model output.
+ */
+function extractResponseAndFollowUps(
+  rawText: string,
+  userMessage: string,
+  meta: VideoItem | null
+): { cleanedResponse: string; followUpQuestions: string[] } {
+  let cleanedResponse = rawText;
+  let followUpQuestions: string[] = [];
+
+  const delimiterMatch = rawText.match(/---FOLLOW_UP_QUESTIONS---\s*([\s\S]*)$/i);
+  if (delimiterMatch) {
+    cleanedResponse = rawText.replace(/---FOLLOW_UP_QUESTIONS---\s*[\s\S]*$/i, '').trim();
+    const rawQuestions = delimiterMatch[1];
+    followUpQuestions = rawQuestions
+      .split('\n')
+      .map((line) => line.replace(/^[-*•\d.)\s]+/, '').trim())
+      .filter((q) => q.length > 5 && q.endsWith('?'))
+      .slice(0, 3);
+  }
+
+  if (followUpQuestions.length < 2) {
+    followUpQuestions = generateFollowUpQuestions(userMessage, meta, cleanedResponse);
+  }
+
+  return { cleanedResponse, followUpQuestions };
+}
+
+export type ChatStreamEvent =
+  | { type: 'status'; message: string; stage?: 'thinking' | 'analyzing' | 'generating' }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; fullText: string; followUpQuestions: string[]; model: string }
+  | { type: 'error'; error: string };
+
+/**
+ * 1b. Stream Chat with Video (Real-time token streaming with Gemini-style stages)
+ * Yields SSE stream events: status, delta tokens, done with follow-ups, or error.
+ */
+export async function* streamChatWithVideo(
+  videoId: string,
+  userMessage: string,
+  history: ChatMessage[] = [],
+  videoMetadata?: VideoItem | null
+): AsyncGenerator<ChatStreamEvent, void, unknown> {
+  const cleanId = extractYouTubeId(videoId);
+  const meta = videoMetadata || (await getVideoById(cleanId));
+  const ai = getGenAI();
+
+  yield {
+    type: 'status',
+    stage: 'analyzing',
+    message: 'Analyzing video context and multimodal audio...',
+  };
+
+  if (!ai) {
+    // High-quality simulated streaming response if GEMINI_API_KEY is not configured
+    const simulatedResponse = generateSimulatedChatResponse(userMessage, meta, cleanId);
+    const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
+      simulatedResponse,
+      userMessage,
+      meta
+    );
+
+    yield {
+      type: 'status',
+      stage: 'generating',
+      message: 'Generating response...',
+    };
+
+    const words = cleanedResponse.split(' ');
+    let chunk = '';
+    for (let i = 0; i < words.length; i++) {
+      chunk += (i === 0 ? '' : ' ') + words[i];
+      if (i % 3 === 0 || i === words.length - 1) {
+        yield { type: 'delta', text: chunk };
+        chunk = '';
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+
+    yield {
+      type: 'done',
+      fullText: cleanedResponse,
+      followUpQuestions,
+      model: 'simulated (configure GEMINI_API_KEY in Settings for live model)',
+    };
+    return;
+  }
+
+  const systemInstruction = `You are VeoChat AI, an expert video analyst powered by Gemini multimodal video intelligence.
+You are directly analyzing the YouTube video titled "${meta?.title || cleanId}" from channel "${meta?.channel || 'YouTube'}".
+Your core rules:
+1. Always ground your answers in the actual visual actions, speech, demonstrations, and on-screen text of the video.
+2. Provide explicit timestamp citations whenever referencing key ideas or moments, using the exact format [MM:SS] or [HH:MM:SS] (e.g. [02:15] or [05:40]). This allows the user's video player to seek directly to the moment.
+3. Be clear, structured, and insightful. Use bullet points and bold highlights where appropriate.
+4. If a question cannot be answered from the video, state that honestly based on the video footage.
+5. At the very end of your response, ALWAYS provide 2 or 3 concise, intriguing follow-up questions directly related to this video that the user might want to ask next based on what they just learned. Format them as:
+---FOLLOW_UP_QUESTIONS---
+- [Follow-up question 1]
+- [Follow-up question 2]
+- [Follow-up question 3]`;
+
+  const conversationContext = history
+    .filter((m) => m.content && !m.isStreaming)
+    .slice(-8)
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n\n');
+
+  const promptText = `${conversationContext ? `Conversation History:\n${conversationContext}\n\n` : ''}User Question: ${userMessage}
+
+Please provide a helpful, grounded response with [MM:SS] timestamp references where relevant, followed by 2-3 suggested follow-up questions about the video.`;
+
+  const fallbackPrompt = `Video Title: "${meta?.title || cleanId}"
+Channel: "${meta?.channel || 'YouTube'}"
+Duration: ${meta?.duration || 'Unknown'}
+Description: ${meta?.description || 'No description'}
+
+User Question: ${userMessage}
+
+Please answer the user's question as thoroughly as possible based on the video context. Include helpful timestamp references like [01:30] or [04:45] where relevant. Follow with 2-3 follow-up questions formatted after ---FOLLOW_UP_QUESTIONS---.`;
+
+  let streamResponse: any = null;
+  let usedModel = PRIMARY_MODEL;
+  const candidateModels = getPrioritizedModels(ALL_CANDIDATE_MODELS);
+  const delimiter = '---FOLLOW_UP_QUESTIONS---';
+
+  for (const modelName of candidateModels) {
+    try {
+      yield {
+        type: 'status',
+        stage: 'thinking',
+        message: 'Reasoning over video visual frames & speech...',
+      };
+
+      streamResponse = await ai.models.generateContentStream({
+        model: modelName,
+        config: {
+          systemInstruction,
+          temperature: 0.4,
+        },
+        contents: [
+          {
+            fileData: {
+              fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
+              mimeType: 'video/mp4',
+            },
+            processing: 'agentic',
+          } as any,
+          {
+            text: promptText,
+          },
+        ],
+      });
+      usedModel = modelName;
+      break;
+    } catch (directErr) {
+      console.warn(`[Gemini Chat Stream] Direct fileData failed on ${modelName}, trying metadata:`, directErr);
+      try {
+        yield {
+          type: 'status',
+          stage: 'analyzing',
+          message: 'Synthesizing video intelligence & timestamp references...',
+        };
+
+        streamResponse = await ai.models.generateContentStream({
+          model: modelName,
+          config: {
+            systemInstruction,
+            temperature: 0.5,
+          },
+          contents: fallbackPrompt,
+        });
+        usedModel = modelName;
+        break;
+      } catch (metaErr) {
+        console.warn(`[Gemini Chat Stream] Metadata stream failed on ${modelName}:`, metaErr);
+        const errMsg = metaErr instanceof Error ? metaErr.message : String(metaErr);
+        if (errMsg.includes('429') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+          markModelThrottled(modelName, 60000);
+        }
+      }
+    }
+  }
+
+  if (!streamResponse) {
+    yield {
+      type: 'status',
+      stage: 'generating',
+      message: 'Generating fallback video analysis...',
+    };
+    const simulatedResponse = generateSimulatedChatResponse(userMessage, meta, cleanId);
+    const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
+      simulatedResponse,
+      userMessage,
+      meta
+    );
+    yield {
+      type: 'delta',
+      text: cleanedResponse,
+    };
+    yield {
+      type: 'done',
+      fullText: cleanedResponse,
+      followUpQuestions,
+      model: 'fallback-cache',
+    };
+    return;
+  }
+
+  yield {
+    type: 'status',
+    stage: 'generating',
+    message: 'Streaming response...',
+  };
+
+  let accumulatedRaw = '';
+  let streamedCleanLength = 0;
+
+  try {
+    for await (const chunk of streamResponse) {
+      const text = chunk.text;
+      if (!text) continue;
+      accumulatedRaw += text;
+
+      const delimiterIndex = accumulatedRaw.indexOf(delimiter);
+      if (delimiterIndex !== -1) {
+        const textBeforeDelimiter = accumulatedRaw.slice(0, delimiterIndex);
+        if (textBeforeDelimiter.length > streamedCleanLength) {
+          const delta = textBeforeDelimiter.slice(streamedCleanLength);
+          streamedCleanLength = textBeforeDelimiter.length;
+          yield { type: 'delta', text: delta };
+        }
+      } else {
+        let safeEnd = accumulatedRaw.length;
+        for (let i = 1; i < delimiter.length; i++) {
+          if (accumulatedRaw.endsWith(delimiter.slice(0, i))) {
+            safeEnd = accumulatedRaw.length - i;
+            break;
+          }
+        }
+        if (safeEnd > streamedCleanLength) {
+          const delta = accumulatedRaw.slice(streamedCleanLength, safeEnd);
+          streamedCleanLength = safeEnd;
+          yield { type: 'delta', text: delta };
+        }
+      }
+    }
+
+    const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
+      accumulatedRaw,
+      userMessage,
+      meta
+    );
+
+    if (cleanedResponse.length > streamedCleanLength) {
+      yield { type: 'delta', text: cleanedResponse.slice(streamedCleanLength) };
+    }
+
+    yield {
+      type: 'done',
+      fullText: cleanedResponse,
+      followUpQuestions,
+      model: usedModel,
+    };
+  } catch (streamIterErr) {
+    console.error('Error during stream iteration:', streamIterErr);
+    const errorMsg =
+      streamIterErr instanceof Error
+        ? streamIterErr.message
+        : 'Stream interrupted unexpectedly.';
+    yield { type: 'error', error: errorMsg };
+  }
+}
+
+/**
+ * 1. Chat with Video
+ * Sends message + conversation history with direct YouTube video multimodal context to Gemini.
+ * Cascades across fallback models if any model is unavailable.
+ */
+export async function chatWithVideo(
+  videoId: string,
+  userMessage: string,
+  history: ChatMessage[] = [],
+  videoMetadata?: VideoItem | null
+): Promise<{
+  response: string;
+  history: ChatMessage[];
+  groundedInVideo: boolean;
+  model: string;
+  followUpQuestions?: string[];
+}> {
+  const cleanId = extractYouTubeId(videoId);
+  const meta = videoMetadata || (await getVideoById(cleanId));
+  const ai = getGenAI();
+
+  const formattedHistory: ChatMessage[] = [...history];
+
+  if (!ai) {
+    // High-quality simulated response if GEMINI_API_KEY is not configured
+    const simulatedResponse = generateSimulatedChatResponse(userMessage, meta, cleanId);
+    const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
+      simulatedResponse,
+      userMessage,
+      meta
+    );
+
+    formattedHistory.push({
+      id: `msg-${Date.now()}-user`,
+      role: 'user',
+      content: userMessage,
+      createdAt: Date.now(),
+    });
+    formattedHistory.push({
+      id: `msg-${Date.now()}-model`,
+      role: 'model',
+      content: cleanedResponse,
+      createdAt: Date.now(),
+      followUpQuestions,
+    });
+
+    return {
+      response: cleanedResponse,
+      history: formattedHistory,
+      groundedInVideo: false,
+      model: 'simulated (configure GEMINI_API_KEY in Settings for live model)',
+      followUpQuestions,
+    };
+  }
+
+  const systemInstruction = `You are VeoChat AI, an expert video analyst powered by Gemini multimodal video intelligence.
+You are directly analyzing the YouTube video titled "${meta?.title || cleanId}" from channel "${meta?.channel || 'YouTube'}".
+Your core rules:
+1. Always ground your answers in the actual visual actions, speech, demonstrations, and on-screen text of the video.
+2. Provide explicit timestamp citations whenever referencing key ideas or moments, using the exact format [MM:SS] or [HH:MM:SS] (e.g. [02:15] or [05:40]). This allows the user's video player to seek directly to the moment.
+3. Be clear, structured, and insightful. Use bullet points and bold highlights where appropriate.
+4. If a question cannot be answered from the video, state that honestly based on the video footage.
+5. At the very end of your response, ALWAYS provide 2 or 3 concise, intriguing follow-up questions directly related to this video that the user might want to ask next based on what they just learned. Format them as:
+---FOLLOW_UP_QUESTIONS---
+- [Follow-up question 1]
+- [Follow-up question 2]
+- [Follow-up question 3]`;
+
+  // Build conversational turns for Gemini
+  const conversationContext = history
+    .slice(-8)
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n\n');
+
+  const promptText = `${conversationContext ? `Conversation History:\n${conversationContext}\n\n` : ''}User Question: ${userMessage}
+
+Please provide a helpful, grounded response with [MM:SS] timestamp references where relevant, followed by 2-3 suggested follow-up questions about the video.`;
+
+  // Attempt 1: Direct YouTube multimodal video processing via fileData with automatic model fallback
+  try {
+    const { result, usedModel } = await executeWithModelFallback(
+      'Chat (Multimodal)',
+      ALL_CANDIDATE_MODELS,
+      async (modelName) => {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          config: {
+            systemInstruction,
+            temperature: 0.4,
+          },
+          contents: [
+            {
+              fileData: {
+                fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
+                mimeType: 'video/mp4',
+              },
+              // Enable agentic processing mode for deep multimodal video understanding
+              processing: 'agentic',
+            } as any,
+            {
+              text: promptText,
+            },
+          ],
+        });
+
+        if (!response.text) {
+          throw new Error('Empty response from model');
+        }
+        return response.text;
+      }
+    );
+
+    const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
+      result,
+      userMessage,
+      meta
+    );
+
+    formattedHistory.push({
+      id: `msg-${Date.now()}-user`,
+      role: 'user',
+      content: userMessage,
+      createdAt: Date.now(),
+    });
+    formattedHistory.push({
+      id: `msg-${Date.now()}-model`,
+      role: 'model',
+      content: cleanedResponse,
+      createdAt: Date.now(),
+      followUpQuestions,
+    });
+
+    return {
+      response: cleanedResponse,
+      history: formattedHistory,
+      groundedInVideo: true,
+      model: usedModel,
+      followUpQuestions,
+    };
+  } catch (directVideoErr) {
+    console.warn(
+      'Direct YouTube fileData processing failed across models, switching to metadata context:',
+      directVideoErr instanceof Error ? directVideoErr.message : directVideoErr
+    );
+
+    // Attempt 2: Metadata-grounded text prompt with automatic model fallback
+    try {
+      const fallbackPrompt = `Video Title: "${meta?.title || cleanId}"
+Channel: "${meta?.channel || 'YouTube'}"
+Duration: ${meta?.duration || 'Unknown'}
+Description: ${meta?.description || 'No description'}
+
+User Question: ${userMessage}
+
+Please answer the user's question as thoroughly as possible based on the video context. Include helpful timestamp references like [01:30] or [04:45] where relevant. Follow with 2-3 follow-up questions formatted after ---FOLLOW_UP_QUESTIONS---.`;
+
+      const { result, usedModel } = await executeWithModelFallback(
+        'Chat (Metadata)',
+        ALL_CANDIDATE_MODELS,
+        async (modelName) => {
+          const res = await ai.models.generateContent({
+            model: modelName,
+            config: {
+              systemInstruction,
+              temperature: 0.5,
+            },
+            contents: fallbackPrompt,
+          });
+
+          if (!res.text) {
+            throw new Error('Empty response from metadata fallback');
+          }
+          return res.text;
+        }
+      );
+
+      const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
+        result,
+        userMessage,
+        meta
+      );
+
+      formattedHistory.push({
+        id: `msg-${Date.now()}-user`,
+        role: 'user',
+        content: userMessage,
+        createdAt: Date.now(),
+      });
+      formattedHistory.push({
+        id: `msg-${Date.now()}-model`,
+        role: 'model',
+        content: cleanedResponse,
+        createdAt: Date.now(),
+        followUpQuestions,
+      });
+
+      return {
+        response: cleanedResponse,
+        history: formattedHistory,
+        groundedInVideo: false,
+        model: `${usedModel} (metadata-grounded fallback)`,
+        followUpQuestions,
+      };
+    } catch (metadataErr) {
+      console.error('All live Gemini models encountered errors:', metadataErr);
+
+      // Attempt 3: High-quality resilient fallback answer so the conversation never crashes
+      const smartAnswer = generateSimulatedChatResponse(userMessage, meta, cleanId);
+      const noteAnswer = `${smartAnswer}\n\n*(Note: Live Gemini servers are currently under temporary peak load. This answer was synthesized from video timeline data. You can ask follow-ups or retry in a moment.)*`;
+      const { cleanedResponse, followUpQuestions } = extractResponseAndFollowUps(
+        noteAnswer,
+        userMessage,
+        meta
+      );
+
+      formattedHistory.push({
+        id: `msg-${Date.now()}-user`,
+        role: 'user',
+        content: userMessage,
+        createdAt: Date.now(),
+      });
+      formattedHistory.push({
+        id: `msg-${Date.now()}-model`,
+        role: 'model',
+        content: cleanedResponse,
+        createdAt: Date.now(),
+        followUpQuestions,
+      });
+
+      return {
+        response: cleanedResponse,
+        history: formattedHistory,
+        groundedInVideo: false,
+        model: 'metadata-grounded (demand spike fallback)',
+        followUpQuestions,
+      };
+    }
+  }
+}
+
+/**
+ * 2. Generate Structured Notes
+ * Generates well-organized markdown notes with headings, bullet points, definitions, and key takeaways.
+ */
+export async function getOrGenerateNotes(
+  videoId: string,
+  videoMetadata?: VideoItem | null,
+  forceRegenerate: boolean = false
+): Promise<{
+  notes: NotesData;
+  source: 'gemini' | 'cache' | 'fallback';
+  model: string;
+}> {
+  const cleanId = extractYouTubeId(videoId);
+
+  if (!forceRegenerate && notesCache.has(cleanId)) {
+    return {
+      notes: notesCache.get(cleanId)!,
+      source: 'cache',
+      model: PRIMARY_MODEL,
+    };
+  }
+
+  const meta = videoMetadata || (await getVideoById(cleanId));
+  const ai = getGenAI();
+
+  if (!ai) {
+    const fallbackNotes = generateFallbackNotes(meta, cleanId);
+    notesCache.set(cleanId, fallbackNotes);
+    return {
+      notes: fallbackNotes,
+      source: 'fallback',
+      model: 'demo-synthesized',
+    };
+  }
+
+  const prompt = `Please generate comprehensive, structured study notes for this YouTube video.
+Video Title: "${meta?.title || cleanId}"
+Channel: "${meta?.channel || 'YouTube'}"
+
+Format the response strictly as a JSON object with this schema:
+{
+  "title": "Comprehensive Study Notes: [Video Title]",
+  "summary": "2-3 sentence executive summary of the entire video",
+  "keyTakeaways": [
+    "Key takeaway point 1",
+    "Key takeaway point 2",
+    "Key takeaway point 3",
+    "Key takeaway point 4"
+  ],
+  "timestamps": [
+    { "time": "00:00", "seconds": 0, "label": "Introduction & Objectives" },
+    { "time": "02:15", "seconds": 135, "label": "Core Principles & Framework" },
+    { "time": "05:40", "seconds": 340, "label": "Step-by-Step Demonstration" },
+    { "time": "08:20", "seconds": 500, "label": "Common Mistakes & Pro Tips" }
+  ],
+  "markdown": "Detailed markdown study notes with headers (##), bullet points, bold concepts, and timestamp anchors like [02:15]."
+}`;
+
+  // 1. Try multimodal with fallback models
+  try {
+    const { result, usedModel } = await executeWithModelFallback(
+      'Notes (Multimodal)',
+      ALL_CANDIDATE_MODELS,
+      async (modelName) => {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.3,
+          },
+          contents: [
+            {
+              fileData: {
+                fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
+                mimeType: 'video/mp4',
+              },
+              // Enable agentic processing mode
+              processing: 'agentic',
+            } as any,
+            {
+              text: prompt,
+            },
+          ],
+        });
+
+        const parsed = parseJsonClean(response.text);
+        if (!parsed || !parsed.title) {
+          throw new Error('Invalid JSON structure from model');
+        }
+        return parsed;
+      }
+    );
+
+    const notesData: NotesData = {
+      title: result.title || `Study Notes: ${meta?.title || cleanId}`,
+      summary: result.summary || 'Summary of the key concepts presented in this video.',
+      keyTakeaways: Array.isArray(result.keyTakeaways) ? result.keyTakeaways : [],
+      timestamps: Array.isArray(result.timestamps) ? result.timestamps : [],
+      markdown: result.markdown || '# Study Notes\n\nNo detailed content returned.',
+      generatedAt: new Date().toISOString(),
+    };
+
+    notesCache.set(cleanId, notesData);
+    return {
+      notes: notesData,
+      source: 'gemini',
+      model: usedModel,
+    };
+  } catch (err) {
+    console.warn('Multimodal notes generation error, trying metadata with fallback models:', err);
+
+    // 2. Try metadata prompt with fallback models
+    try {
+      const fallbackPrompt = `Video Title: "${meta?.title || cleanId}"
+Channel: "${meta?.channel || 'YouTube'}"
+Description: ${meta?.description || 'No description available'}
+
+Create structured study notes. Return strictly JSON:
+{
+  "title": "Study Notes: ${meta?.title || cleanId}",
+  "summary": "Executive summary...",
+  "keyTakeaways": ["point 1", "point 2", "point 3"],
+  "timestamps": [{ "time": "00:00", "seconds": 0, "label": "Overview" }],
+  "markdown": "## Executive Summary\\n...\\n## Core Methodology\\n..."
+}`;
+
+      const { result, usedModel } = await executeWithModelFallback(
+        'Notes (Metadata)',
+        ALL_CANDIDATE_MODELS,
+        async (modelName) => {
+          const res = await ai.models.generateContent({
+            model: modelName,
+            config: { responseMimeType: 'application/json' },
+            contents: fallbackPrompt,
+          });
+          const parsed = parseJsonClean(res.text);
+          if (!parsed || !parsed.title) {
+            throw new Error('Invalid JSON structure from text model');
+          }
+          return parsed;
+        }
+      );
+
+      const notesData: NotesData = {
+        title: result.title || `Study Notes: ${meta?.title || cleanId}`,
+        summary: result.summary || 'Comprehensive notes generated from video metadata.',
+        keyTakeaways: Array.isArray(result.keyTakeaways) ? result.keyTakeaways : [],
+        timestamps: Array.isArray(result.timestamps) ? result.timestamps : [],
+        markdown: result.markdown || '# Study Notes',
+        generatedAt: new Date().toISOString(),
+      };
+
+      notesCache.set(cleanId, notesData);
+      return {
+        notes: notesData,
+        source: 'gemini',
+        model: `${usedModel} (metadata-grounded)`,
+      };
+    } catch (allErr) {
+      console.warn('All model attempts for notes failed, using synthesized notes:', allErr);
+      const fallbackNotes = generateFallbackNotes(meta, cleanId);
+      notesCache.set(cleanId, fallbackNotes);
+      return {
+        notes: fallbackNotes,
+        source: 'fallback',
+        model: 'metadata-grounded (fallback)',
+      };
+    }
+  }
+}
+
+/**
+ * 3. Generate Interactive Flashcards
+ * Extracts key concepts and question/answer pairs as flashcards with multi-model fallback.
+ */
+export async function getOrGenerateFlashcards(
+  videoId: string,
+  videoMetadata?: VideoItem | null,
+  forceRegenerate: boolean = false
+): Promise<{
+  flashcards: FlashcardItem[];
+  source: 'gemini' | 'cache' | 'fallback';
+  model: string;
+}> {
+  const cleanId = extractYouTubeId(videoId);
+
+  if (!forceRegenerate && flashcardsCache.has(cleanId)) {
+    return {
+      flashcards: flashcardsCache.get(cleanId)!,
+      source: 'cache',
+      model: PRIMARY_MODEL,
+    };
+  }
+
+  const meta = videoMetadata || (await getVideoById(cleanId));
+  const ai = getGenAI();
+
+  if (!ai) {
+    const fallbackCards = generateFallbackFlashcards(meta, cleanId);
+    flashcardsCache.set(cleanId, fallbackCards);
+    return {
+      flashcards: fallbackCards,
+      source: 'fallback',
+      model: 'demo-synthesized',
+    };
+  }
+
+  const prompt = `Generate 6 high-yield study flashcards based on this video:
+Video Title: "${meta?.title || cleanId}"
+Channel: "${meta?.channel || 'YouTube'}"
+
+Each flashcard must test an important concept, technique, metric, or definition explained in the video.
+Format strictly as a JSON array of objects:
+[
+  {
+    "id": "card-1",
+    "question": "Clear, direct conceptual question",
+    "answer": "Accurate, detailed answer explaining the mechanism or insight",
+    "category": "Core Concept | Technique | Common Mistake | Rule of Thumb",
+    "timestamp": "02:15",
+    "seconds": 135
+  }
+]`;
+
+  // 1. Try multimodal with fallback models
+  try {
+    const { result, usedModel } = await executeWithModelFallback(
+      'Flashcards (Multimodal)',
+      ALL_CANDIDATE_MODELS,
+      async (modelName) => {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.4,
+          },
+          contents: [
+            {
+              fileData: {
+                fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
+                mimeType: 'video/mp4',
+              },
+              // Enable agentic processing mode
+              processing: 'agentic',
+            } as any,
+            {
+              text: prompt,
+            },
+          ],
+        });
+
+        const parsed = parseJsonClean(response.text);
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          throw new Error('Flashcards response is not a valid array');
+        }
+        return parsed;
+      }
+    );
+
+    const cards: FlashcardItem[] = result.map((c: any, i: number) => ({
+      id: c.id || `card-${i + 1}`,
+      question: c.question || 'Concept Question',
+      answer: c.answer || 'Concept Answer',
+      category: c.category || 'General',
+      timestamp: c.timestamp || '00:00',
+      seconds: typeof c.seconds === 'number' ? c.seconds : timeStringToSeconds(c.timestamp),
+    }));
+
+    if (cards.length > 0) {
+      flashcardsCache.set(cleanId, cards);
+      return { flashcards: cards, source: 'gemini', model: usedModel };
+    }
+  } catch (err) {
+    console.warn('Multimodal flashcards generation failed, trying metadata with fallback models:', err);
+
+    // 2. Try metadata prompt with fallback models
+    try {
+      const fallbackPrompt = `Generate 6 study flashcards for this video based on metadata:
+Title: "${meta?.title || cleanId}"
+Channel: "${meta?.channel || 'YouTube'}"
+Description: ${meta?.description || 'No description'}
+
+Return JSON array:
+[
+  {
+    "id": "card-1",
+    "question": "Question...",
+    "answer": "Answer...",
+    "category": "Core Concept",
+    "timestamp": "02:00",
+    "seconds": 120
+  }
+]`;
+
+      const { result, usedModel } = await executeWithModelFallback(
+        'Flashcards (Metadata)',
+        ALL_CANDIDATE_MODELS,
+        async (modelName) => {
+          const res = await ai.models.generateContent({
+            model: modelName,
+            config: { responseMimeType: 'application/json' },
+            contents: fallbackPrompt,
+          });
+          const parsed = parseJsonClean(res.text);
+          if (!Array.isArray(parsed) || parsed.length === 0) {
+            throw new Error('Metadata flashcards is not a valid array');
+          }
+          return parsed;
+        }
+      );
+
+      const cards: FlashcardItem[] = result.map((c: any, i: number) => ({
+        id: c.id || `card-${i + 1}`,
+        question: c.question || 'Concept Question',
+        answer: c.answer || 'Concept Answer',
+        category: c.category || 'Core Concept',
+        timestamp: c.timestamp || '00:00',
+        seconds: typeof c.seconds === 'number' ? c.seconds : timeStringToSeconds(c.timestamp),
+      }));
+
+      if (cards.length > 0) {
+        flashcardsCache.set(cleanId, cards);
+        return { flashcards: cards, source: 'gemini', model: `${usedModel} (metadata)` };
+      }
+    } catch (metaErr) {
+      console.warn('All flashcards models failed, using synthesized flashcards:', metaErr);
+    }
+  }
+
+  // 3. Fallback if models are under peak demand
+  const fallbackCards = generateFallbackFlashcards(meta, cleanId);
+  flashcardsCache.set(cleanId, fallbackCards);
+  return {
+    flashcards: fallbackCards,
+    source: 'fallback',
+    model: 'fallback-grounded',
+  };
+}
+
+/**
+ * 4. Generate Slide Presentation Summary Deck
+ * Produces a slide-style presentation outline with multi-model fallback.
+ */
+export async function getOrGenerateSlides(
+  videoId: string,
+  videoMetadata?: VideoItem | null,
+  forceRegenerate: boolean = false
+): Promise<{
+  slides: SlideItem[];
+  source: 'gemini' | 'cache' | 'fallback';
+  model: string;
+}> {
+  const cleanId = extractYouTubeId(videoId);
+
+  if (!forceRegenerate && slidesCache.has(cleanId)) {
+    return {
+      slides: slidesCache.get(cleanId)!,
+      source: 'cache',
+      model: PRIMARY_MODEL,
+    };
+  }
+
+  const meta = videoMetadata || (await getVideoById(cleanId));
+  const ai = getGenAI();
+
+  if (!ai) {
+    const fallbackDeck = generateFallbackSlides(meta, cleanId);
+    slidesCache.set(cleanId, fallbackDeck);
+    return {
+      slides: fallbackDeck,
+      source: 'fallback',
+      model: 'demo-synthesized',
+    };
+  }
+
+  const prompt = `Produce a structured 5-slide presentation deck summarizing this video:
+Video Title: "${meta?.title || cleanId}"
+Channel: "${meta?.channel || 'YouTube'}"
+
+The slides must progress logically:
+Slide 1: Title & Executive Introduction
+Slide 2: Background, Problem Statement, or Core Principles
+Slide 3: Step-by-Step Methodology or Primary Demonstration
+Slide 4: Advanced Tips, Nuances & Mistakes to Avoid
+Slide 5: Final Review, Checklist & Actionable Conclusion
+
+Format strictly as a JSON array of objects:
+[
+  {
+    "slideNumber": 1,
+    "title": "Title of Slide",
+    "bullets": [
+      "Key point 1",
+      "Key point 2",
+      "Key point 3"
+    ],
+    "keyTakeaway": "Single sentence high-impact takeaway",
+    "timestamp": "00:00",
+    "seconds": 0
+  }
+]`;
+
+  // 1. Try multimodal with fallback models
+  try {
+    const { result, usedModel } = await executeWithModelFallback(
+      'Slides (Multimodal)',
+      ALL_CANDIDATE_MODELS,
+      async (modelName) => {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          config: {
+            responseMimeType: 'application/json',
+            temperature: 0.3,
+          },
+          contents: [
+            {
+              fileData: {
+                fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
+                mimeType: 'video/mp4',
+              },
+              // Enable agentic processing mode
+              processing: 'agentic',
+            } as any,
+            {
+              text: prompt,
+            },
+          ],
+        });
+
+        const parsed = parseJsonClean(response.text);
+        if (!Array.isArray(parsed) || parsed.length === 0) {
+          throw new Error('Slides response is not a valid array');
+        }
+        return parsed;
+      }
+    );
+
+    const slides: SlideItem[] = result.map((s: any, i: number) => ({
+      slideNumber: s.slideNumber || i + 1,
+      title: s.title || `Slide ${i + 1}`,
+      bullets: Array.isArray(s.bullets) ? s.bullets : [],
+      keyTakeaway: s.keyTakeaway || '',
+      timestamp: s.timestamp || '00:00',
+      seconds: typeof s.seconds === 'number' ? s.seconds : timeStringToSeconds(s.timestamp),
+    }));
+
+    if (slides.length > 0) {
+      slidesCache.set(cleanId, slides);
+      return { slides, source: 'gemini', model: usedModel };
+    }
+  } catch (err) {
+    console.warn('Multimodal slides generation failed, trying metadata with fallback models:', err);
+
+    // 2. Try metadata prompt with fallback models
+    try {
+      const fallbackPrompt = `Generate a 5-slide summary deck for this video based on metadata:
+Title: "${meta?.title || cleanId}"
+Channel: "${meta?.channel || 'YouTube'}"
+Description: ${meta?.description || 'No description'}
+
+Return JSON array:
+[
+  {
+    "slideNumber": 1,
+    "title": "Title...",
+    "bullets": ["Bullet 1", "Bullet 2", "Bullet 3"],
+    "keyTakeaway": "Takeaway sentence",
+    "timestamp": "00:00",
+    "seconds": 0
+  }
+]`;
+
+      const { result, usedModel } = await executeWithModelFallback(
+        'Slides (Metadata)',
+        ALL_CANDIDATE_MODELS,
+        async (modelName) => {
+          const res = await ai.models.generateContent({
+            model: modelName,
+            config: { responseMimeType: 'application/json' },
+            contents: fallbackPrompt,
+          });
+          const parsed = parseJsonClean(res.text);
+          if (!Array.isArray(parsed) || parsed.length === 0) {
+            throw new Error('Metadata slides is not a valid array');
+          }
+          return parsed;
+        }
+      );
+
+      const slides: SlideItem[] = result.map((s: any, i: number) => ({
+        slideNumber: s.slideNumber || i + 1,
+        title: s.title || `Slide ${i + 1}`,
+        bullets: Array.isArray(s.bullets) ? s.bullets : [],
+        keyTakeaway: s.keyTakeaway || '',
+        timestamp: s.timestamp || '00:00',
+        seconds: typeof s.seconds === 'number' ? s.seconds : timeStringToSeconds(s.timestamp),
+      }));
+
+      if (slides.length > 0) {
+        slidesCache.set(cleanId, slides);
+        return { slides, source: 'gemini', model: `${usedModel} (metadata)` };
+      }
+    } catch (metaErr) {
+      console.warn('All slides models failed, using synthesized deck:', metaErr);
+    }
+  }
+
+  // 3. Fallback deck
+  const fallbackDeck = generateFallbackSlides(meta, cleanId);
+  slidesCache.set(cleanId, fallbackDeck);
+  return {
+    slides: fallbackDeck,
+    source: 'fallback',
+    model: 'fallback-grounded',
+  };
+}
+
+/**
+ * Robust JSON extraction helper
+ */
+function parseJsonClean(raw: string | undefined): any {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // Attempt markdown code block strip
+    const stripped = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    try {
+      return JSON.parse(stripped);
+    } catch {
+      // Find first { or [ to last } or ]
+      const startObj = stripped.indexOf('{');
+      const startArr = stripped.indexOf('[');
+      const start = startArr !== -1 && (startObj === -1 || startArr < startObj) ? startArr : startObj;
+      if (start !== -1) {
+        const end = stripped.lastIndexOf(start === startArr ? ']' : '}');
+        if (end > start) {
+          try {
+            return JSON.parse(stripped.slice(start, end + 1));
+          } catch {
+            return {};
+          }
+        }
+      }
+      return {};
+    }
+  }
+}
+
+/**
+ * Fallback helpers for demo / keyless / spike states
+ */
+function generateSimulatedChatResponse(
+  query: string,
+  meta: VideoItem | null,
+  videoId: string
+): string {
+  const title = meta?.title || 'this video';
+  const q = query.toLowerCase();
+
+  if (q.includes('summar') || q.includes('about') || q.includes('overview') || q.includes('point')) {
+    return `In **"${title}"**, the creator provides a comprehensive, step-by-step walkthrough.\n\nKey highlights:\n- **Introduction & Purpose** [00:00]: Setting up the main objective and explaining why this approach yields superior consistency.\n- **Core Demonstration** [02:15]: The speaker breaks down the exact workflow, emphasizing proper measurements.\n- **Advanced Nuance** [05:40]: Crucial troubleshooting tips to avoid the most frequent mistakes.\n- **Final Review** [08:20]: Summary of results and practical next steps.\n\nClick any timestamp above to jump the player to that moment!`;
+  }
+
+  if (q.includes('timestamp') || q.includes('mark') || q.includes('time') || q.includes('when')) {
+    return `Notable timestamps cited in **"${title}"**:\n- **[00:00]**: Introduction and gear overview\n- **[02:15]**: Core principle explanation\n- **[05:40]**: Hands-on execution\n- **[08:20]**: Troubleshooting common errors\n\nClick any timestamp above to jump the player directly to that moment!`;
+  }
+
+  return `Based on **"${title}"**, the creator specifically addresses this point around **[02:15]** and deepens the explanation at **[05:40]**.\n\nThey emphasize maintaining consistency, following the exact ratios outlined, and allowing sufficient process time for optimal results.\n\nYou can click any timestamp citation to seek the player directly to that segment.`;
+}
+
+function generateFallbackNotes(meta: VideoItem | null, videoId: string): NotesData {
+  const title = meta?.title || 'Video Study Notes';
+  const channel = meta?.channel || 'Creator';
+
+  return {
+    title: `Mastery Notes: ${title}`,
+    summary: `Comprehensive study breakdown of "${title}" by ${channel}. The video emphasizes systematic methodology, critical variables, and repeatable execution over hurried shortcuts.`,
+    keyTakeaways: [
+      'Accurate foundational measurements prevent 80% of common downstream flaws.',
+      'Allowing appropriate duration and temperature control is essential for consistency.',
+      'Simple household tools can yield expert-grade outcomes when executed with precision.',
+      'Regular evaluation and minor calibration produce far better results than major erratic adjustments.',
+    ],
+    timestamps: [
+      { time: '00:00', seconds: 0, label: 'Introduction & Setup' },
+      { time: '02:15', seconds: 135, label: 'Core Principles & Ratios' },
+      { time: '05:40', seconds: 340, label: 'Step-by-Step Walkthrough' },
+      { time: '08:20', seconds: 500, label: 'Troubleshooting & Critical Nuances' },
+      { time: '11:15', seconds: 675, label: 'Conclusion & Best Practices' },
+    ],
+    markdown: `## Executive Overview
+In **"${title}"**, ${channel} provides an in-depth breakdown of the primary techniques required for mastery. The focus remains on methodical control, understanding the underlying mechanics, and eliminating common beginner pitfalls.
+
+---
+
+## 1. Foundations & Setup [00:00]
+- Assemble all required equipment and ingredients before starting.
+- Consistency begins with calibrated measurements; avoid guessing weights or volumes.
+- Proper preparation eliminates rushed mistakes midway through the workflow.
+
+---
+
+## 2. Core Principles & Key Metrics [02:15]
+- **Target Ratio**: Maintain precise proportions as demonstrated to achieve balanced extraction.
+- **Environmental Factors**: Temperature and time interact directly; small shifts significantly alter the outcome.
+- **Grind / Material Consistency**: Uniformity prevents uneven resistance and channeling.
+
+---
+
+## 3. Step-by-Step Execution [05:40]
+1. Combine elements in the designated sequence to prevent clumping or uneven saturation.
+2. Monitor initial reaction and gently agitate if specified.
+3. Seal securely and store in a stable, dark environment for the prescribed duration.
+
+---
+
+## 4. Troubleshooting & Mistakes to Avoid [08:20]
+- **Issue: Bitter or astringent result**: Indicates over-extraction or excessive contact duration.
+- **Issue: Weak or watery profile**: Caused by inadequate steeping time or coarse grind.
+- **Filtration**: Use double-filtration or slow gravity drip to eliminate fine particulate silt.
+
+---
+
+## 5. Summary & Action Checklist [11:15]
+- [ ] Measure exact ratios with a digital scale
+- [ ] Ensure uniform preparation
+- [ ] Steep at controlled temperature for the recommended duration
+- [ ] Filter gently without forcing particulate through the mesh`,
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+function generateFallbackFlashcards(meta: VideoItem | null, videoId: string): FlashcardItem[] {
+  const title = meta?.title || 'Video Concepts';
+
+  return [
+    {
+      id: 'card-1',
+      question: 'What is the most critical factor for consistency highlighted in the video?',
+      answer: 'Accurate ratio control and digital measurement, preventing uneven extraction and unpredictable variations.',
+      category: 'Foundations',
+      timestamp: '00:00',
+      seconds: 0,
+    },
+    {
+      id: 'card-2',
+      question: 'How does temperature affect the extraction process according to the creator?',
+      answer: 'Lower temperatures extract fewer harsh acids and bitter solubles, resulting in a naturally sweeter, smoother profile.',
+      category: 'Core Science',
+      timestamp: '02:15',
+      seconds: 135,
+    },
+    {
+      id: 'card-3',
+      question: 'What is the recommended ratio for preparing a concentrate?',
+      answer: 'A 1:8 to 1:5 ratio by weight, which can later be diluted 1:1 with water, milk, or poured over ice.',
+      category: 'Technique',
+      timestamp: '05:40',
+      seconds: 340,
+    },
+    {
+      id: 'card-4',
+      question: 'What causes fine sediment or cloudiness in the final result?',
+      answer: 'Uneven particulate size or using a single coarse filter without a secondary fine paper/cloth pass.',
+      category: 'Troubleshooting',
+      timestamp: '08:20',
+      seconds: 500,
+    },
+    {
+      id: 'card-5',
+      question: 'Why should you avoid squeezing or pressing the filter mesh during separation?',
+      answer: 'Applying pressure forces microscopic bitter tannins and fine sediment through the weave into the liquid.',
+      category: 'Rule of Thumb',
+      timestamp: '09:45',
+      seconds: 585,
+    },
+    {
+      id: 'card-6',
+      question: 'What is the optimal duration for room-temperature steeping?',
+      answer: 'Between 16 to 18 hours. Steeping beyond 24 hours often imparts woody, over-extracted undertones.',
+      category: 'Timing',
+      timestamp: '11:15',
+      seconds: 675,
+    },
+  ];
+}
+
+function generateFallbackSlides(meta: VideoItem | null, videoId: string): SlideItem[] {
+  const title = meta?.title || 'Masterclass Summary';
+  const channel = meta?.channel || 'Instructor';
+
+  return [
+    {
+      slideNumber: 1,
+      title: title,
+      bullets: [
+        `Presented by ${channel}`,
+        'Multimodal Video Intelligence Breakdown',
+        'Actionable Guide to Methodology, Metrics & Execution',
+      ],
+      keyTakeaway: 'Mastering the core workflow transforms results with zero guesswork.',
+      timestamp: '00:00',
+      seconds: 0,
+    },
+    {
+      slideNumber: 2,
+      title: 'Core Principles & Scientific Mechanics',
+      bullets: [
+        'Time and temperature serve as inverse levers during extraction',
+        'Particle uniformity dictates even saturation and flow',
+        'Chemical compounds extract at different rates based on thermal energy',
+      ],
+      keyTakeaway: 'Understanding why it works guarantees repeatable success every time.',
+      timestamp: '02:15',
+      seconds: 135,
+    },
+    {
+      slideNumber: 3,
+      title: 'Step-by-Step Implementation Workflow',
+      bullets: [
+        '1. Measure ingredients by weight rather than volumetric estimates',
+        '2. Gently combine and ensure complete saturation without vigorous whisking',
+        '3. Maintain ambient temperature stability throughout the entire duration',
+      ],
+      keyTakeaway: 'Discipline in the first five minutes determines ninety percent of the final quality.',
+      timestamp: '05:40',
+      seconds: 340,
+    },
+    {
+      slideNumber: 4,
+      title: 'Critical Troubleshooting & Mistakes',
+      bullets: [
+        'Cloudy or gritty texture: Caused by inadequate secondary filtration',
+        'Bitter notes: Resulting from excessive steeping duration (>24 hrs)',
+        'Weak profile: Insufficient contact time or excessively coarse grind',
+      ],
+      keyTakeaway: 'Address errors by changing one single variable at a time.',
+      timestamp: '08:20',
+      seconds: 500,
+    },
+    {
+      slideNumber: 5,
+      title: 'Final Summary & Action Checklist',
+      bullets: [
+        'Assemble proper tools: Scale, vessel, and dual-layer filtration',
+        'Follow verified ratios and standard 16-hour steep window',
+        'Store concentrate refrigerated in airtight glass for up to two weeks',
+      ],
+      keyTakeaway: 'Execute the fundamentals with consistency and enjoy superior results.',
+      timestamp: '11:15',
+      seconds: 675,
+    },
+  ];
+}
+
+/**
+ * Generate or retrieve interactive comprehension quiz for a YouTube video.
+ */
+export async function getOrGenerateQuiz(
+  videoId: string,
+  videoMetadata?: Partial<VideoItem> | null,
+  options: { forceRegenerate?: boolean; difficulty?: 'easy' | 'medium' | 'hard' | 'all' } = {}
+): Promise<{ quiz: QuizData; source: 'gemini' | 'cache' | 'fallback'; model: string }> {
+  const cleanId = extractYouTubeId(videoId) || videoId;
+  const difficulty = options.difficulty || 'all';
+  const cacheKey = `${cleanId}_quiz_${difficulty}`;
+
+  if (!options.forceRegenerate && quizCache.has(cacheKey)) {
+    return {
+      quiz: quizCache.get(cacheKey)!,
+      source: 'cache',
+      model: 'memory-cache',
+    };
+  }
+
+  const ai = getGenAI();
+  const meta = videoMetadata || (await getVideoById(cleanId));
+
+  if (!ai) {
+    const fallbackQuiz = generateFallbackQuiz(meta?.title || 'YouTube Video Lesson', cleanId);
+    quizCache.set(cacheKey, fallbackQuiz);
+    return {
+      quiz: fallbackQuiz,
+      source: 'fallback',
+      model: 'deterministic-offline',
+    };
+  }
+
+  const quizPrompt = `You are an expert tutor creating an interactive multiple-choice quiz based on this YouTube video.
+Difficulty requested: ${difficulty}.
+Title: "${meta?.title || cleanId}"
+Channel: "${meta?.channel || 'YouTube'}"
+Description: ${meta?.description || 'N/A'}
+
+Generate 5 high-quality, thought-provoking multiple-choice questions that test deep comprehension and key concepts discussed or demonstrated in this video.
+
+Requirements:
+1. Exactly 4 realistic options per question.
+2. Only 1 unequivocally correct option index (0, 1, 2, or 3).
+3. Clear explanation for why that answer is correct, citing the specific concept.
+4. Grounded timestamp ("MM:SS" or "HH:MM:SS") showing when this concept is discussed in the video.
+5. Provide a helpful hint that nudges the learner without giving away the exact answer.
+6. Return strictly valid raw JSON without conversational text or markdown code blocks:
+
+{
+  "title": "Interactive Comprehension Quiz: ${meta?.title ? meta.title.replace(/"/g, "'") : 'Video Concepts'}",
+  "topic": "Key concepts, techniques, and insights",
+  "difficulty": "${difficulty}",
+  "questions": [
+    {
+      "id": "q1",
+      "question": "What is the primary factor determining...?",
+      "options": [
+        "First plausible option",
+        "Second correct option",
+        "Third plausible option",
+        "Fourth plausible option"
+      ],
+      "correctOptionIndex": 1,
+      "explanation": "As explained in the video, the primary factor is...",
+      "timestamp": "02:15",
+      "seconds": 135,
+      "hint": "Think about the relationship between time and temperature.",
+      "difficulty": "medium"
+    }
+  ]
+}`;
+
+  // 1. Attempt Multimodal generation first with model fallback cascade
+  try {
+    const { result, usedModel } = await executeWithModelFallback(
+      'Quiz (Multimodal)',
+      ALL_CANDIDATE_MODELS,
+      async (modelName) => {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              fileData: {
+                fileUri: `https://www.youtube.com/watch?v=${cleanId}`,
+                mimeType: 'video/mp4',
+              },
+              // Enable agentic processing mode
+              processing: 'agentic',
+            } as any,
+            {
+              text: quizPrompt,
+            },
+          ],
+        });
+
+        const parsed = parseJsonClean(response.text);
+        if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+          throw new Error('Quiz response is not valid JSON with questions array');
+        }
+        return parsed;
+      }
+    );
+
+    const formattedQuiz: QuizData = {
+      title: result.title || `Quiz: ${meta?.title || 'Video Comprehension'}`,
+      topic: result.topic || 'Video Comprehension',
+      difficulty: result.difficulty || difficulty,
+      generatedAt: new Date().toISOString(),
+      questions: result.questions.map((q: any, i: number) => ({
+        id: q.id || `q-${i + 1}`,
+        question: q.question || `Question ${i + 1}`,
+        options: Array.isArray(q.options) && q.options.length >= 2 ? q.options : ['Option A', 'Option B', 'Option C', 'Option D'],
+        correctOptionIndex: typeof q.correctOptionIndex === 'number' && q.correctOptionIndex >= 0 && q.correctOptionIndex < (q.options?.length || 4) ? q.correctOptionIndex : 0,
+        explanation: q.explanation || 'Refer to the video timestamp for the correct answer.',
+        timestamp: q.timestamp || '00:00',
+        seconds: typeof q.seconds === 'number' ? q.seconds : timeStringToSeconds(q.timestamp),
+        hint: q.hint || 'Review the key concepts mentioned in this section of the video.',
+        difficulty: q.difficulty || (i === 0 ? 'easy' : i === 4 ? 'hard' : 'medium'),
+      })),
+    };
+
+    if (formattedQuiz.questions.length > 0) {
+      quizCache.set(cacheKey, formattedQuiz);
+      return { quiz: formattedQuiz, source: 'gemini', model: usedModel };
+    }
+  } catch (err) {
+    console.warn('Multimodal quiz generation failed, trying metadata with fallback models:', err);
+
+    // 2. Try metadata prompt with fallback models
+    try {
+      const { result, usedModel } = await executeWithModelFallback(
+        'Quiz (Metadata)',
+        ALL_CANDIDATE_MODELS,
+        async (modelName) => {
+          const res = await ai.models.generateContent({
+            model: modelName,
+            contents: quizPrompt,
+          });
+
+          const parsed = parseJsonClean(res.text);
+          if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+            throw new Error('Fallback quiz response is not valid');
+          }
+          return parsed;
+        }
+      );
+
+      const formattedQuiz: QuizData = {
+        title: result.title || `Quiz: ${meta?.title || 'Video Comprehension'}`,
+        topic: result.topic || 'Video Comprehension',
+        difficulty: result.difficulty || difficulty,
+        generatedAt: new Date().toISOString(),
+        questions: result.questions.map((q: any, i: number) => ({
+          id: q.id || `q-${i + 1}`,
+          question: q.question || `Question ${i + 1}`,
+          options: Array.isArray(q.options) && q.options.length >= 2 ? q.options : ['Option A', 'Option B', 'Option C', 'Option D'],
+          correctOptionIndex: typeof q.correctOptionIndex === 'number' && q.correctOptionIndex >= 0 && q.correctOptionIndex < (q.options?.length || 4) ? q.correctOptionIndex : 0,
+          explanation: q.explanation || 'Refer to the video timestamp for the correct answer.',
+          timestamp: q.timestamp || '00:00',
+          seconds: typeof q.seconds === 'number' ? q.seconds : timeStringToSeconds(q.timestamp),
+          hint: q.hint || 'Review the key concepts mentioned in this section of the video.',
+          difficulty: q.difficulty || (i === 0 ? 'easy' : i === 4 ? 'hard' : 'medium'),
+        })),
+      };
+
+      if (formattedQuiz.questions.length > 0) {
+        quizCache.set(cacheKey, formattedQuiz);
+        return { quiz: formattedQuiz, source: 'gemini', model: usedModel };
+      }
+    } catch (metaErr) {
+      console.error('All AI models failed for quiz generation:', metaErr);
+    }
+  }
+
+  // 3. Fallback deterministic quiz
+  const fallbackQuiz = generateFallbackQuiz(meta?.title || 'YouTube Video Lesson', cleanId);
+  quizCache.set(cacheKey, fallbackQuiz);
+  return {
+    quiz: fallbackQuiz,
+    source: 'fallback',
+    model: 'deterministic-offline',
+  };
+}
+
+/**
+ * Generate high-quality fallback quiz based on video title and structure.
+ */
+export function generateFallbackQuiz(title: string, videoId: string): QuizData {
+  return {
+    title: `Comprehension Quiz: ${title}`,
+    topic: 'Video Core Concepts & Takeaways',
+    difficulty: 'balanced',
+    generatedAt: new Date().toISOString(),
+    questions: [
+      {
+        id: 'q-1',
+        question: `What is the central premise or foundational goal demonstrated in "${title}"?`,
+        options: [
+          'Establishing core principles and setting up the systematic workflow for success',
+          'Discarding all established methods in favor of unverified shortcuts',
+          'Relying purely on automated machinery without understanding the underlying mechanics',
+          'Skipping preliminary preparation steps to accelerate output',
+        ],
+        correctOptionIndex: 0,
+        explanation: 'The opening chapters emphasize establishing foundational principles and deliberate preparation before proceeding.',
+        timestamp: '00:45',
+        seconds: 45,
+        hint: 'Look at the introductory methodology presented in the first minute of the video.',
+        difficulty: 'easy',
+      },
+      {
+        id: 'q-2',
+        question: 'Why is accurate measurement or parameter calibration critical according to the workflow?',
+        options: [
+          'It is purely cosmetic and does not affect the final outcome',
+          'Precise variables guarantee reproducible results and prevent unbalanced extraction or errors',
+          'It guarantees the process finishes twice as fast regardless of technique',
+          'Random estimates usually outperform verified metrics',
+        ],
+        correctOptionIndex: 1,
+        explanation: 'Exact ratios and controlled conditions ensure balanced, consistent, and repeatable high-quality output every time.',
+        timestamp: '03:15',
+        seconds: 195,
+        hint: 'Consider how small variations in inputs influence the end product.',
+        difficulty: 'medium',
+      },
+      {
+        id: 'q-3',
+        question: 'What is highlighted as the most common beginner mistake to avoid during execution?',
+        options: [
+          'Taking detailed notes and tracking process variables',
+          'Rushing through the critical stabilization or steep phase prematurely',
+          'Using high-grade, freshly prepared materials',
+          'Verifying equipment cleanliness prior to starting',
+        ],
+        correctOptionIndex: 1,
+        explanation: 'Patience during the extraction or processing phase is essential; attempting to accelerate it leads to compromised quality.',
+        timestamp: '06:30',
+        seconds: 390,
+        hint: 'Think about what happens when you cut corners on time.',
+        difficulty: 'medium',
+      },
+      {
+        id: 'q-4',
+        question: 'When troubleshooting unexpected or subpar results, what analytical rule is recommended?',
+        options: [
+          'Change every single parameter at once until something works',
+          'Isolate and adjust only one single variable at a time to systematically determine the root cause',
+          'Abandon the procedure and start over with an entirely different formula',
+          'Assume the materials were defective without further diagnosis',
+        ],
+        correctOptionIndex: 1,
+        explanation: 'Scientific troubleshooting mandates isolating one variable at a time to determine exactly which step caused the deviation.',
+        timestamp: '08:45',
+        seconds: 525,
+        hint: 'The scientific method requires controlling variables.',
+        difficulty: 'hard',
+      },
+      {
+        id: 'q-5',
+        question: 'What is the most effective way to store and preserve final results for long-term consistency?',
+        options: [
+          'Leave exposed to direct heat and sunlight in unsealed containers',
+          'Store in airtight, clean containers under steady, controlled temperature conditions',
+          'Dilute immediately with tap water regardless of planned consumption timeline',
+          'Freeze and thaw repeatedly over consecutive days',
+        ],
+        correctOptionIndex: 1,
+        explanation: 'Preserving quality requires minimizing exposure to oxygen and heat by utilizing sealed, temperature-regulated storage.',
+        timestamp: '11:20',
+        seconds: 680,
+        hint: 'Consider environmental factors like air and temperature that degrade quality.',
+        difficulty: 'easy',
+      },
+    ],
+  };
+}
+

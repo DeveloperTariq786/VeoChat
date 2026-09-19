@@ -1,0 +1,28 @@
+{
+  "$schema": "https://firebase.google.com/docs/firestore/blueprint.schema.json",
+  "entities": {
+    "users": {
+      "description": "User profile records",
+      "fields": {
+        "uid": { "type": "string", "description": "User UID" },
+        "email": { "type": "string", "description": "User email address" },
+        "displayName": { "type": "string", "description": "User display name" },
+        "photoURL": { "type": "string", "description": "User avatar photo URL" },
+        "createdAt": { "type": "string", "description": "Account creation ISO timestamp" },
+        "lastLoginAt": { "type": "string", "description": "Last sign-in ISO timestamp" }
+      },
+      "subcollections": {
+        "searches": {
+          "description": "User conversational video search history",
+          "fields": {
+            "id": { "type": "string", "description": "Search item ID" },
+            "userId": { "type": "string", "description": "Owning user UID" },
+            "query": { "type": "string", "description": "Search query text" },
+            "timestamp": { "type": "number", "description": "Search timestamp epoch ms" },
+            "resultsCount": { "type": "number", "description": "Number of videos returned" }
+          }
+        }
+      }
+    }
+  }
+}
