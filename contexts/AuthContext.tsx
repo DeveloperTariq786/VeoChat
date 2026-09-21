@@ -73,6 +73,7 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  hasStoredSession: boolean;
   signInWithGoogle: () => Promise<User | null>;
   logout: () => Promise<void>;
   saveSearchHistory: (query: string, videos: VideoItem[], source?: string) => Promise<void>;
@@ -85,10 +86,32 @@ interface AuthContextType {
   clearQuizHistory: () => Promise<void>;
 }
 
+export function checkStoredSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    if (document.documentElement.getAttribute('data-user-session') === 'true') {
+      return true;
+    }
+    if (localStorage.getItem('veochat_has_session') === '1') {
+      return true;
+    }
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('firebase:authUser') || key.startsWith('indexedDB:firebase'))) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   loading: true,
+  hasStoredSession: false,
   signInWithGoogle: async () => null,
   logout: async () => {},
   saveSearchHistory: async () => {},
@@ -102,8 +125,17 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [hasStoredSession, setHasStoredSession] = useState<boolean>(() => checkStoredSession());
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('veochat_cached_profile');
+        if (cached) return JSON.parse(cached);
+      } catch {}
+    }
+    return null;
+  });
   const [loading, setLoading] = useState<boolean>(true);
 
   const syncUserProfile = async (firebaseUser: User) => {
@@ -149,8 +181,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
+        setHasStoredSession(true);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('veochat_has_session', '1');
+            document.documentElement.setAttribute('data-user-session', 'true');
+            const minProfile: UserProfile = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email || '',
+              displayName: firebaseUser.displayName || 'VeoChat Explorer',
+              photoURL: firebaseUser.photoURL || '',
+            };
+            localStorage.setItem('veochat_cached_profile', JSON.stringify(minProfile));
+          } catch {}
+        }
         await syncUserProfile(firebaseUser);
       } else {
+        setUser(null);
+        setHasStoredSession(false);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem('veochat_has_session');
+            localStorage.removeItem('veochat_cached_profile');
+            document.documentElement.removeAttribute('data-user-session');
+          } catch {}
+        }
         setProfile(null);
         searchThreadStore.clear();
       }
@@ -164,6 +219,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const result = await signInWithPopup(auth, googleProvider);
       if (result.user) {
+        setHasStoredSession(true);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('veochat_has_session', '1');
+            document.documentElement.setAttribute('data-user-session', 'true');
+            const minProfile: UserProfile = {
+              uid: result.user.uid,
+              email: result.user.email || '',
+              displayName: result.user.displayName || 'VeoChat Explorer',
+              photoURL: result.user.photoURL || '',
+            };
+            localStorage.setItem('veochat_cached_profile', JSON.stringify(minProfile));
+          } catch {}
+        }
         searchThreadStore.clear();
         await syncUserProfile(result.user);
         return result.user;
@@ -177,6 +246,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem('veochat_has_session');
+          localStorage.removeItem('veochat_cached_profile');
+          document.documentElement.removeAttribute('data-user-session');
+        } catch {}
+      }
+      setHasStoredSession(false);
       searchThreadStore.clear();
       await signOut(auth);
       setUser(null);
@@ -361,6 +438,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         user,
         profile,
         loading,
+        hasStoredSession,
         signInWithGoogle,
         logout,
         saveSearchHistory,

@@ -11,6 +11,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { Logo } from '@/components/Logo';
 import { VideoItem } from '@/types/video';
 import { isWithinAllowedDuration } from '@/lib/videoDuration';
+import { useIsMounted } from '@/lib/useIsMounted';
 import { useSearchThread, SearchTurn } from '@/lib/searchThreadStore';
 import {
   Sparkles,
@@ -310,12 +311,49 @@ function AuthenticatedSearchWorkspace() {
 }
 
 export default function HomePage() {
-  const { user } = useAuth();
+  const { user, profile, hasStoredSession } = useAuth();
+  const isMounted = useIsMounted();
 
-  // Instant static landing page with zero delay for SEO and immediate initial visits
-  if (!user) {
+  if (isMounted) {
+    // 1. If user is authenticated or has a cached profile with stored session, show workspace immediately
+    if (user || (hasStoredSession && profile)) {
+      return <AuthenticatedSearchWorkspace />;
+    }
+
+    // 2. If user has a stored session but profile is still loading, show workspace loader (never show landing page)
+    if (hasStoredSession) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
+          <div className="flex flex-col items-center gap-3">
+            <Logo size={42} className="animate-pulse" priority />
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+              Loading your video workspace...
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // 3. User is not authenticated: render landing page instantly
     return <LandingPage />;
   }
 
-  return <AuthenticatedSearchWorkspace />;
+  // Pre-mount / SSR frame:
+  // - HTML and CSS prevent flashing landing page for authenticated users via data-user-session attribute
+  // - Unauthenticated visitors immediately see the full landing page without loader
+  return (
+    <>
+      <div className="veochat-session-loader min-h-screen flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
+        <div className="flex flex-col items-center gap-3">
+          <Logo size={42} className="animate-pulse" priority />
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+            Opening video workspace...
+          </p>
+        </div>
+      </div>
+      <div className="veochat-landing-view">
+        <LandingPage />
+      </div>
+    </>
+  );
 }

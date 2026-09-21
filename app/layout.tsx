@@ -193,6 +193,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                     document.documentElement.classList.remove('dark');
                   }
                 } catch (e) {}
+
+                try {
+                  var hasSession = localStorage.getItem('veochat_has_session') === '1';
+                  if (!hasSession) {
+                    for (var i = 0; i < localStorage.length; i++) {
+                      var k = localStorage.key(i);
+                      if (k && (k.indexOf('firebase:authUser') === 0 || k.indexOf('indexedDB:firebase') === 0)) {
+                        hasSession = true;
+                        break;
+                      }
+                    }
+                  }
+                  if (hasSession) {
+                    document.documentElement.setAttribute('data-user-session', 'true');
+                  } else {
+                    document.documentElement.removeAttribute('data-user-session');
+                  }
+                } catch (e) {}
               })();
             `,
           }}

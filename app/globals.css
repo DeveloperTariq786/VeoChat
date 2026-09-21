@@ -7,3 +7,17 @@
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
   }
 }
+
+/* Fast concealment of landing page for returning authenticated sessions before paint */
+html[data-user-session="true"] .veochat-landing-view {
+  display: none !important;
+}
+
+.veochat-session-loader {
+  display: none;
+}
+
+html[data-user-session="true"] .veochat-session-loader {
+  display: flex !important;
+}
+
