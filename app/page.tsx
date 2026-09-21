@@ -177,9 +177,7 @@ function AuthenticatedSearchWorkspace() {
         {/* Empty state: Clean conversational prompt if no turns yet */}
         {turns.length === 0 && (
           <div className="flex-1 flex flex-col items-center justify-center min-h-[50vh] text-center px-4 max-w-3xl mx-auto space-y-4 my-auto">
-            <div className="w-10 h-10 rounded-2xl bg-red-600/10 text-red-600 dark:text-red-400 flex items-center justify-center shadow-xs">
-              <Search className="w-5 h-5" />
-            </div>
+            <Logo size={44} className="rounded-2xl shadow-xs" priority />
             <div className="space-y-1">
               <h2 className="text-sm sm:text-base font-semibold text-zinc-900 dark:text-white">
                 Conversational Video Search
