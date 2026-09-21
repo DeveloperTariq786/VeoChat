@@ -158,66 +158,6 @@ export function SlideViewer({
 
   return (
     <div id="slide-viewer-root" className="flex flex-col h-full w-full overflow-hidden bg-white dark:bg-zinc-900">
-      {/* Top Header - Full width matching ChatPanel */}
-      <div className="h-11 flex items-center justify-between px-3.5 sm:px-4 border-b border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/40 text-xs shrink-0 w-full">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-lg bg-red-600/10 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
-            <Presentation className="w-3.5 h-3.5" />
-          </div>
-          <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">
-            Slides
-          </span>
-          {slides.length > 0 && (
-            <span className="text-zinc-500 dark:text-zinc-400 font-mono text-[11px]">
-              ({currentSlideIndex + 1}/{slides.length})
-            </span>
-          )}
-        </div>
-
-        {slides.length > 0 && (
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setIsGridView(!isGridView)}
-              className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-colors cursor-pointer ${
-                isGridView
-                  ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-white font-medium'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
-              }`}
-              title={isGridView ? 'Deck view' : 'Grid overview'}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>{isGridView ? 'Slide' : 'Grid'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleCopyOutline}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-              title="Copy slide deck outline"
-            >
-              {copied ? (
-                <Check className="w-3.5 h-3.5 text-emerald-500" />
-              ) : (
-                <Copy className="w-3.5 h-3.5" />
-              )}
-              <span>{copied ? 'Copied' : 'Outline'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleGenerateSlides(true)}
-              disabled={isLoading}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-50"
-              title="Regenerate presentation slides"
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              <span>Regenerate</span>
-            </button>
-          </div>
-        )}
-      </div>
-
       {/* Main Slide Body */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col items-center scrollbar-thin min-h-0">
         <div className="max-w-3xl w-full flex-1 flex flex-col justify-between">
@@ -235,6 +175,56 @@ export function SlideViewer({
             >
               Retry
             </button>
+          </div>
+        )}
+
+        {/* Active Slides Toolbar */}
+        {slides.length > 0 && !isLoading && (
+          <div className="flex items-center justify-between pb-3 text-xs w-full">
+            <span className="font-mono text-xs font-medium text-zinc-700 dark:text-zinc-300">
+              Slide {currentSlideIndex + 1} of {slides.length}
+            </span>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setIsGridView(!isGridView)}
+                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs transition-colors cursor-pointer ${
+                  isGridView
+                    ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-white font-medium'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                }`}
+                title={isGridView ? 'Deck view' : 'Grid overview'}
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>{isGridView ? 'Slide' : 'Grid'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyOutline}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                title="Copy slide deck outline"
+              >
+                {copied ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+                <span>{copied ? 'Copied' : 'Outline'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleGenerateSlides(true)}
+                disabled={isLoading}
+                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-50"
+                title="Regenerate presentation slides"
+              >
+                <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                <span>Regenerate</span>
+              </button>
+            </div>
           </div>
         )}
 

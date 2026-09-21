@@ -478,7 +478,14 @@ export async function* chatWithVideoStream(
   userMessage: string,
   history: ChatMessage[] = [],
   videoMetadata?: VideoItem | null
-): AsyncGenerator<{ text?: string; followUpQuestions?: string[]; done?: boolean; error?: string }> {
+): AsyncGenerator<{
+  text?: string;
+  followUpQuestions?: string[];
+  done?: boolean;
+  error?: string;
+  status?: string;
+  statusMessage?: string;
+}> {
   const cleanId = extractYouTubeId(videoId);
   const meta = videoMetadata || (await getVideoById(cleanId));
   const ai = getGenAI();
@@ -1715,4 +1722,301 @@ export function generateFallbackQuiz(title: string, videoId: string): QuizData {
     ],
   };
 }
+
+export interface QuizHistoryAnalysisInput {
+  id?: string;
+  videoId?: string;
+  videoTitle?: string;
+  videoChannel?: string;
+  score?: number;
+  totalQuestions?: number;
+  percentage?: number;
+  difficulty?: string;
+  createdAt?: string;
+  timestamp?: number;
+  questionsSummary?: {
+    question: string;
+    userAnswer: string;
+    correctAnswer: string;
+    correct: boolean;
+    explanation?: string;
+    timestamp?: string;
+  }[];
+}
+
+export interface QuizProgressAnalysis {
+  overallSummary: string;
+  masteryScore: number;
+  masteryLevel: string;
+  learningVelocity: string;
+  keyStrengths: string[];
+  areasForImprovement: string[];
+  studyRecommendations: string[];
+  personalizedTip: string;
+  topicBreakdown: {
+    topic: string;
+    accuracy: number;
+    status: 'mastered' | 'learning' | 'needs_review';
+    totalQuestions: number;
+  }[];
+  streakInsights: string;
+  totalQuizzesAnalyzed: number;
+  overallAccuracy: number;
+  modelUsed?: string;
+}
+
+/**
+ * Analyzes the user's cumulative quiz history using Gemini AI to provide an intelligent progress summary,
+ * knowledge strengths, improvement recommendations, and learning velocity insights.
+ */
+export async function analyzeQuizHistoryProgress(
+  attempts: QuizHistoryAnalysisInput[],
+  userName?: string
+): Promise<QuizProgressAnalysis> {
+  const totalQuizzes = attempts.length;
+
+  if (totalQuizzes === 0) {
+    return {
+      overallSummary: 'No completed quizzes found yet. Take quizzes on video lessons to track your learning progress and unlock personalized AI knowledge analysis!',
+      masteryScore: 0,
+      masteryLevel: 'Explorer',
+      learningVelocity: 'Getting Started',
+      keyStrengths: ['Ready to begin your learning journey', 'Curious and eager to discover new concepts'],
+      areasForImprovement: ['Complete your first video quiz to evaluate retention'],
+      studyRecommendations: [
+        'Watch a tutorial or lecture and open the Quiz tab',
+        'Test your comprehension after each key section',
+        'Review timestamped explanations to reinforce unfamiliar topics',
+      ],
+      personalizedTip: 'Start with a short 5-minute video and try a Balanced quiz to establish your baseline!',
+      topicBreakdown: [],
+      streakInsights: 'Take your first quiz today to start building your mastery streak.',
+      totalQuizzesAnalyzed: 0,
+      overallAccuracy: 0,
+    };
+  }
+
+  // Calculate high-level statistical baselines
+  let totalScore = 0;
+  let totalQuestionsCount = 0;
+  const incorrectQuestions: { question: string; topic: string; explanation: string }[] = [];
+  const correctQuestions: { question: string; topic: string }[] = [];
+  const topicsMap = new Map<string, { correct: number; total: number }>();
+
+  attempts.forEach((att) => {
+    const score = typeof att.score === 'number' ? att.score : 0;
+    const total = typeof att.totalQuestions === 'number' && att.totalQuestions > 0 ? att.totalQuestions : 5;
+    totalScore += score;
+    totalQuestionsCount += total;
+
+    const topicName = att.videoTitle
+      ? att.videoTitle.replace(/\|.*$/g, '').replace(/-.*$/g, '').trim().slice(0, 45)
+      : 'General Learning';
+
+    const currentTopic = topicsMap.get(topicName) || { correct: 0, total: 0 };
+    currentTopic.correct += score;
+    currentTopic.total += total;
+    topicsMap.set(topicName, currentTopic);
+
+    if (Array.isArray(att.questionsSummary)) {
+      att.questionsSummary.forEach((q) => {
+        if (!q.correct) {
+          incorrectQuestions.push({
+            question: q.question || 'Concept question',
+            topic: topicName,
+            explanation: q.explanation || '',
+          });
+        } else {
+          correctQuestions.push({
+            question: q.question || 'Concept question',
+            topic: topicName,
+          });
+        }
+      });
+    }
+  });
+
+  const overallAccuracy = totalQuestionsCount > 0 ? Math.round((totalScore / totalQuestionsCount) * 100) : 0;
+
+  // Build topic breakdown list
+  const topicBreakdown = Array.from(topicsMap.entries())
+    .slice(0, 6)
+    .map(([topic, stats]) => {
+      const acc = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
+      let status: 'mastered' | 'learning' | 'needs_review' = 'learning';
+      if (acc >= 80) status = 'mastered';
+      else if (acc < 60) status = 'needs_review';
+      return {
+        topic,
+        accuracy: acc,
+        status,
+        totalQuestions: stats.total,
+      };
+    });
+
+  // Determine baseline mastery tier
+  let defaultMasteryLevel = 'Curious Explorer';
+  if (overallAccuracy >= 90 && totalQuizzes >= 3) defaultMasteryLevel = 'Mastery Scholar';
+  else if (overallAccuracy >= 80) defaultMasteryLevel = 'Proficient Learner';
+  else if (overallAccuracy >= 65) defaultMasteryLevel = 'Active Practitioner';
+
+  const defaultVelocity =
+    totalQuizzes >= 5 ? 'High Momentum' : totalQuizzes >= 2 ? 'Consistent' : 'Building Foundations';
+
+  const ai = getGenAI();
+  if (!ai) {
+    return {
+      overallSummary: `You have completed ${totalQuizzes} quiz session${totalQuizzes > 1 ? 's' : ''} with an overall accuracy of ${overallAccuracy}%. You have answered ${totalScore} out of ${totalQuestionsCount} questions correctly.`,
+      masteryScore: overallAccuracy,
+      masteryLevel: defaultMasteryLevel,
+      learningVelocity: defaultVelocity,
+      keyStrengths: [
+        `Strong performance across ${topicBreakdown.filter((t) => t.accuracy >= 75).length || 1} core topic area(s)`,
+        'Demonstrates good recall on conceptual questions',
+        'Consistently engaging with video comprehension materials',
+      ],
+      areasForImprovement:
+        incorrectQuestions.length > 0
+          ? [
+              `Review timestamp segments on missed topics (${incorrectQuestions.slice(0, 2).map((q) => q.topic).join(', ')})`,
+              'Practice challenging difficulty questions to deepen complex reasoning',
+            ]
+          : ['Maintain your high accuracy with challenging tier quizzes'],
+      studyRecommendations: [
+        'Review the key timestamp links in previously completed quizzes',
+        'Retake quizzes with Challenging difficulty to solidify advanced concepts',
+        'Use the interactive chat to ask targeted follow-up questions on tricky segments',
+      ],
+      personalizedTip: `Focus on reviewing timestamps for any question scored below 80% to lock in key takeaways.`,
+      topicBreakdown,
+      streakInsights: `Active learning streak with ${totalQuizzes} completed quiz evaluation${totalQuizzes > 1 ? 's' : ''}.`,
+      totalQuizzesAnalyzed: totalQuizzes,
+      overallAccuracy,
+      modelUsed: 'Heuristic Baseline',
+    };
+  }
+
+  const prompt = `You are an expert Learning Coach and Educational Analyst for VeoChat.
+Analyze this student's quiz history and provide an insightful, highly encouraging, and analytically sharp progress assessment.
+IMPORTANT: Never mention model names, Gemini, AI version numbers, or "powered by AI" in your responses. Speak naturally as a helpful educational coach.
+
+STUDENT PROFILE:
+- Name: ${userName || 'Student'}
+- Total Quizzes Completed: ${totalQuizzes}
+- Overall Accuracy: ${overallAccuracy}% (${totalScore}/${totalQuestionsCount} correct)
+- Recent Quiz Attempts:
+${JSON.stringify(
+  attempts.slice(0, 15).map((a) => ({
+    videoTitle: a.videoTitle,
+    score: `${a.score}/${a.totalQuestions}`,
+    percentage: `${a.percentage}%`,
+    difficulty: a.difficulty,
+    date: a.createdAt,
+    missedQuestions: (a.questionsSummary || []).filter((q) => !q.correct).map((q) => ({
+      question: q.question,
+      userAnswer: q.userAnswer,
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation,
+    })),
+  })),
+  null,
+  2
+)}
+
+OUTPUT INSTRUCTIONS:
+Return a strictly valid JSON object with the following schema:
+{
+  "overallSummary": "A friendly, comprehensive 2-3 sentence overview of their learning journey, retention quality, and recent momentum.",
+  "masteryScore": number (0-100 score rating calculated with nuance considering difficulty and volume),
+  "masteryLevel": "e.g. Mastery Scholar | Proficient Learner | Active Practitioner | Dedicated Explorer",
+  "learningVelocity": "e.g. Accelerating | High Momentum | Steady Progress | Building Foundations",
+  "keyStrengths": ["3 concise, specific bullet points celebrating actual topics and question styles they excelled at"],
+  "areasForImprovement": ["2-3 specific, constructive bullet points highlighting missed concepts or patterns to revisit"],
+  "studyRecommendations": ["3 high-impact, actionable next steps (e.g. reviewing specific timestamp segments, trying hard difficulty, asking AI chat)"],
+  "personalizedTip": "1 memorable golden rule or study tip tailored to the subjects they are watching",
+  "streakInsights": "A motivating 1-sentence observation about their study habit and persistence"
+}
+Do NOT include markdown wrapping like \`\`\`json. Return raw valid JSON only.`;
+
+  try {
+    const { result, usedModel } = await executeWithModelFallback(
+      'analyzeQuizProgress',
+      ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-3.1-flash-lite'],
+      async (modelName) => {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: prompt,
+          config: {
+            temperature: 0.3,
+            responseMimeType: 'application/json',
+          },
+        });
+        return { text: response.text || '', modelName };
+      }
+    );
+
+    let parsed: Partial<QuizProgressAnalysis> = {};
+    try {
+      const cleanJson = result.text.replace(/^```json\s*/, '').replace(/\s*```$/, '').trim();
+      parsed = JSON.parse(cleanJson);
+    } catch {
+      console.warn('Failed to parse Gemini JSON for quiz progress analysis');
+    }
+
+    return {
+      overallSummary:
+        parsed.overallSummary ||
+        `Great job completing ${totalQuizzes} quiz${totalQuizzes > 1 ? 'zes' : ''}! Your overall accuracy stands at ${overallAccuracy}%.`,
+      masteryScore: typeof parsed.masteryScore === 'number' ? parsed.masteryScore : overallAccuracy,
+      masteryLevel: parsed.masteryLevel || defaultMasteryLevel,
+      learningVelocity: parsed.learningVelocity || defaultVelocity,
+      keyStrengths:
+        Array.isArray(parsed.keyStrengths) && parsed.keyStrengths.length > 0
+          ? parsed.keyStrengths
+          : ['High consistency in foundational recall', 'Active retention across video lessons'],
+      areasForImprovement:
+        Array.isArray(parsed.areasForImprovement) && parsed.areasForImprovement.length > 0
+          ? parsed.areasForImprovement
+          : ['Review missed timestamp moments to close retention gaps'],
+      studyRecommendations:
+        Array.isArray(parsed.studyRecommendations) && parsed.studyRecommendations.length > 0
+          ? parsed.studyRecommendations
+          : [
+              'Check explanations on missed questions',
+              'Take challenging-tier quizzes to test advanced comprehension',
+            ],
+      personalizedTip:
+        parsed.personalizedTip ||
+        'Active recall right after watching a video boosts long-term memory retention by up to 50%!',
+      topicBreakdown,
+      streakInsights:
+        parsed.streakInsights ||
+        `Consistent practice across ${totalQuizzes} quiz session${totalQuizzes > 1 ? 's' : ''}.`,
+      totalQuizzesAnalyzed: totalQuizzes,
+      overallAccuracy,
+      modelUsed: usedModel,
+    };
+  } catch (err) {
+    console.error('Error generating AI quiz progress analysis:', err);
+    return {
+      overallSummary: `You have completed ${totalQuizzes} quiz session${totalQuizzes > 1 ? 's' : ''} with an overall accuracy of ${overallAccuracy}%.`,
+      masteryScore: overallAccuracy,
+      masteryLevel: defaultMasteryLevel,
+      learningVelocity: defaultVelocity,
+      keyStrengths: ['Consistent video comprehension engagement', 'Solid grasp of core introductory topics'],
+      areasForImprovement: ['Re-watch timestamps of questions with lower accuracy'],
+      studyRecommendations: [
+        'Review the explanation notes on missed questions',
+        'Explore related video topics in the search tab',
+      ],
+      personalizedTip: 'Revisiting a video quiz after 24 hours reinforces synaptic retention.',
+      topicBreakdown,
+      streakInsights: `Active learning streak with ${totalQuizzes} completed quizzes.`,
+      totalQuizzesAnalyzed: totalQuizzes,
+      overallAccuracy,
+      modelUsed: 'Fallback Engine',
+    };
+  }
+}
+
 

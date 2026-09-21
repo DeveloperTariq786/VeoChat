@@ -170,48 +170,6 @@ export function FlashcardDeck({
 
   return (
     <div id="flashcard-deck-root" className="flex flex-col h-full w-full overflow-hidden bg-white dark:bg-zinc-900">
-      {/* Top Header - Full width matching ChatPanel */}
-      <div className="h-11 flex items-center justify-between px-3.5 sm:px-4 border-b border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/40 text-xs shrink-0 w-full">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-lg bg-red-600/10 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
-            <Layers className="w-3.5 h-3.5" />
-          </div>
-          <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">
-            Flashcards
-          </span>
-          {cards.length > 0 && (
-            <span className="text-zinc-500 dark:text-zinc-400 font-mono text-[11px]">
-              ({currentIndex + 1}/{cards.length})
-            </span>
-          )}
-        </div>
-
-        {cards.length > 0 && (
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={handleShuffle}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-              title="Shuffle cards"
-            >
-              <Shuffle className="w-3.5 h-3.5" />
-              <span>Shuffle</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleGenerateFlashcards(true)}
-              disabled={isLoading}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-50"
-              title="Regenerate new flashcards"
-            >
-              <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-              <span>Regenerate</span>
-            </button>
-          </div>
-        )}
-      </div>
-
       {/* Main Flashcard Body */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col items-center scrollbar-thin min-h-0">
         <div className="max-w-2xl w-full flex-1 flex flex-col justify-between">
@@ -269,14 +227,45 @@ export function FlashcardDeck({
         {/* Active Card Viewer */}
         {cards.length > 0 && !isLoading && currentCard && (
           <div className="flex flex-col flex-1 justify-between gap-4 py-2">
-            {/* Progress Bar */}
-            <div className="w-full bg-neutral-200 dark:bg-neutral-800 h-1.5 rounded-full overflow-hidden">
-              <div
-                className="bg-red-600 h-full transition-all duration-300 rounded-full"
-                style={{
-                  width: `${((currentIndex + 1) / cards.length) * 100}%`,
-                }}
-              />
+            {/* Toolbar and Progress */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400">
+                <span className="font-mono text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  Card {currentIndex + 1} of {cards.length}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleShuffle}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer text-xs"
+                    title="Shuffle cards"
+                  >
+                    <Shuffle className="w-3.5 h-3.5" />
+                    <span>Shuffle</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateFlashcards(true)}
+                    disabled={isLoading}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer disabled:opacity-50 text-xs"
+                    title="Regenerate new flashcards"
+                  >
+                    <RotateCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                    <span>Regenerate</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="w-full bg-neutral-200 dark:bg-neutral-800 h-1.5 rounded-full overflow-hidden">
+                <div
+                  className="bg-red-600 h-full transition-all duration-300 rounded-full"
+                  style={{
+                    width: `${((currentIndex + 1) / cards.length) * 100}%`,
+                  }}
+                />
+              </div>
             </div>
 
             {/* Interactive Flip Card Container */}

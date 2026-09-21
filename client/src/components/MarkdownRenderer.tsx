@@ -38,25 +38,62 @@ export function parseTimeToSeconds(timeStr: string): number {
 }
 
 /**
- * Preprocesses markdown text to ensure chemical equations and math formulas
- * (e.g. \(...\), \[...\], \ce{...}, $Mg^{2+}$, etc.) are formatted for remark-math & KaTeX.
+ * Preprocesses markdown text to ensure chemical equations, LaTeX expressions,
+ * and math formulas (e.g. \(...\), \[...\], \ce{...}, \frac{...}{...}, \sqrt{...}, etc.)
+ * are reliably wrapped in math delimiters ($...$ or $$...$$) for remark-math & KaTeX.
  */
 export function normalizeMathAndFormulas(text: string): string {
   if (!text) return '';
 
   let processed = text;
 
-  // 1. Convert display math: \[ ... \] -> $$ ... $$
+  // 1. Convert display math delimiters: \[ ... \] -> \n$$\n...\n$$\n
   processed = processed.replace(/\\\[([\s\S]*?)\\\]/g, (_, math) => `\n$$\n${math.trim()}\n$$\n`);
 
-  // 2. Convert inline math: \( ... \) -> $ ... $
+  // 2. Convert inline math delimiters: \( ... \) -> $ ... $
   processed = processed.replace(/\\\(([\s\S]*?)\\\)/g, (_, math) => `$${math.trim()}$`);
 
-  // 3. Auto-wrap raw chemical formula \ce{...} not already wrapped in $
-  // Example: \ce{H2O} -> $\ce{H2O}$
-  processed = processed.replace(/(^|[^\$])\\ce\{([^}]+)\}([^\$]|$)/g, '$1$\\ce{$2$}$3');
+  // 3. Convert LaTeX environments (equation, align, cases, matrix, pmatrix, bmatrix) into $$...$$ blocks
+  processed = processed.replace(
+    /\\begin\{(equation\*?|align\*?|matrix|pmatrix|bmatrix|vmatrix|cases)\}([\s\S]*?)\\end\{\1\}/g,
+    (_, env, body) => `\n$$\n\\begin{${env}}${body}\\end{${env}}\n$$\n`
+  );
 
-  return processed;
+  // 4. Tokenize to avoid altering contents inside existing code blocks (``` or `) or existing math ($ / $$)
+  const tokenRegex = /(```[\s\S]*?```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$(?:\\\$|[^\$\n])+\$)/g;
+  const parts = processed.split(tokenRegex);
+
+  const enrichedParts = parts.map((part, idx) => {
+    // If it's a preserved token (code or existing math), keep it intact
+    if (idx % 2 === 1) {
+      return part;
+    }
+
+    let segment = part;
+
+    // Auto-wrap raw chemical formulas: \ce{...} -> $\ce{...}$
+    segment = segment.replace(/\\ce\{([^}]+)\}/g, '$\\ce{$1}$');
+
+    // Auto-wrap un-delimited LaTeX commands like \frac{...}{...}, \sqrt{...}, \sum_{...}^{...}, \int, \lim, etc.
+    // Handles complex LaTeX math strings like: \frac{a}{b}, \sqrt{x^2+y^2}, \alpha + \beta = \gamma, etc.
+    segment = segment.replace(
+      /((?:\\[a-zA-Z]+(?:\*|\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}|\[[^[\]]*\]|_[a-zA-Z0-9{}]+|\^[a-zA-Z0-9{}]+|[0-9a-zA-Z+\-*/=<>^_()]+)*\s*)+)/g,
+      (match) => {
+        const trimmed = match.trim();
+        // Check if the match contains actual LaTeX math indicator commands
+        const mathCommands = /\\(?:frac|sqrt|sum|int|lim|prod|partial|nabla|alpha|beta|gamma|delta|epsilon|varepsilon|zeta|eta|theta|vartheta|iota|kappa|lambda|mu|nu|xi|pi|varpi|rho|varrho|sigma|varsigma|tau|upsilon|phi|varphi|chi|psi|omega|Gamma|Delta|Theta|Lambda|Xi|Pi|Sigma|Upsilon|Phi|Psi|Omega|times|div|pm|mp|cdot|circ|bullet|approx|neq|ne|leq|le|geq|ge|ll|gg|subset|supset|subseteq|supseteq|in|notin|ni|cap|cup|setminus|forall|exists|nexists|empty|emptyset|infty|to|rightarrow|Rightarrow|leftarrow|Leftarrow|leftrightarrow|Leftrightarrow|mapsto|nearrow|searrow|nwarrow|swarrow|sin|cos|tan|csc|sec|cot|arcsin|arccos|arctan|sinh|cosh|tanh|coth|ln|log|exp|det|dim|ker|deg|gcd|min|max|sup|inf|lim|limsup|liminf|text|mathrm|mathbf|mathit|mathsf|mathtt|mathbb|mathcal|binom|over|choose)\b/;
+        
+        if (mathCommands.test(trimmed) && trimmed.length > 2) {
+          return `$${trimmed}$`;
+        }
+        return match;
+      }
+    );
+
+    return segment;
+  });
+
+  return enrichedParts.join('');
 }
 
 /**

@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { VideoItem, QuizData, QuizQuestion } from '@/types/video';
+import { useAuth } from '@/contexts/AuthContext';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import {
   BrainCircuit,
@@ -46,6 +47,14 @@ export function QuizPanel({
   const [showHint, setShowHint] = useState<Record<number, boolean>>({});
   const [isQuizCompleted, setIsQuizCompleted] = useState<boolean>(false);
   const [difficulty, setDifficulty] = useState<QuizDifficulty>('all');
+  const [hasSavedAttempt, setHasSavedAttempt] = useState<boolean>(false);
+  const savedAttemptKeyRef = useRef<string | null>(null);
+
+  const { user, saveQuizAttempt } = useAuth();
+
+  const questions: QuizQuestion[] = useMemo(() => quiz?.questions || [], [quiz]);
+  const currentQuestion = questions[currentQuestionIndex];
+  const totalQuestions = questions.length;
 
   const fetchQuiz = useCallback(
     async (forceRegenerate = false, targetDifficulty: QuizDifficulty = difficulty) => {
@@ -83,6 +92,8 @@ export function QuizPanel({
         setShowExplanation({});
         setShowHint({});
         setIsQuizCompleted(false);
+        setHasSavedAttempt(false);
+        savedAttemptKeyRef.current = null;
 
         if (onQuizLoaded && data.quiz?.questions) {
           onQuizLoaded(data.quiz.questions.length);
@@ -97,6 +108,48 @@ export function QuizPanel({
     },
     [videoId, difficulty, onQuizLoaded]
   );
+
+  useEffect(() => {
+    if (!isQuizCompleted || totalQuestions === 0 || !user) return;
+
+    const answersKey = `${videoId}_${Object.entries(selectedAnswers)
+      .sort()
+      .map(([k, v]) => `${k}:${v}`)
+      .join(',')}`;
+    if (savedAttemptKeyRef.current === answersKey) return;
+    savedAttemptKeyRef.current = answersKey;
+
+    const calculatedScore = questions.reduce((acc, q, idx) => {
+      return acc + (selectedAnswers[idx] === q.correctOptionIndex ? 1 : 0);
+    }, 0);
+    const calculatedPercentage = Math.round((calculatedScore / totalQuestions) * 100);
+
+    const questionsSummary = questions.map((q, idx) => ({
+      question: q.question,
+      userAnswer: selectedAnswers[idx] !== undefined ? q.options[selectedAnswers[idx]] || '' : 'Unanswered',
+      correctAnswer: q.options[q.correctOptionIndex] || '',
+      correct: selectedAnswers[idx] === q.correctOptionIndex,
+      explanation: q.explanation || '',
+      timestamp: q.timestamp || '',
+      seconds: q.seconds || 0,
+    }));
+
+    saveQuizAttempt({
+      videoId,
+      videoTitle: video?.title || 'YouTube Video',
+      videoChannel: video?.channel || 'YouTube Creator',
+      videoThumbnail: video?.thumbnail || '',
+      score: calculatedScore,
+      totalQuestions,
+      percentage: calculatedPercentage,
+      difficulty,
+      questionsSummary,
+    }).then((id) => {
+      if (id) {
+        setHasSavedAttempt(true);
+      }
+    });
+  }, [isQuizCompleted, totalQuestions, user, videoId, video, selectedAnswers, questions, difficulty, saveQuizAttempt]);
 
   useEffect(() => {
     let isMounted = true;
@@ -143,10 +196,6 @@ export function QuizPanel({
     };
   }, [videoId, onQuizLoaded]);
 
-  const questions: QuizQuestion[] = quiz?.questions || [];
-  const currentQuestion = questions[currentQuestionIndex];
-  const totalQuestions = questions.length;
-
   const handleSelectOption = (optionIndex: number) => {
     if (selectedAnswers[currentQuestionIndex] !== undefined) {
       // Already answered this question
@@ -174,6 +223,8 @@ export function QuizPanel({
     setShowExplanation({});
     setShowHint({});
     setIsQuizCompleted(false);
+    setHasSavedAttempt(false);
+    savedAttemptKeyRef.current = null;
   };
 
   const calculateScore = () => {
@@ -191,49 +242,6 @@ export function QuizPanel({
 
   return (
     <div id="quiz-panel-container" className="flex-1 flex flex-col h-full w-full overflow-hidden bg-white dark:bg-zinc-900">
-      {/* Top Controls Header - Full width matching ChatPanel */}
-      <div className="h-11 px-3.5 sm:px-4 border-b border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/40 flex items-center justify-between shrink-0 gap-2 w-full text-xs">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="w-6 h-6 rounded-lg bg-red-600/10 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
-            <BrainCircuit className="w-3.5 h-3.5" />
-          </div>
-          <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100 truncate">
-            Quiz
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          {/* Difficulty selector */}
-          <select
-            aria-label="Quiz Difficulty"
-            value={difficulty}
-            onChange={(e) => {
-              const newDiff = e.target.value as QuizDifficulty;
-              setDifficulty(newDiff);
-              fetchQuiz(true, newDiff);
-            }}
-            disabled={isLoading || isRegenerating}
-            className="text-[11px] font-medium bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-1 focus:ring-red-500 cursor-pointer"
-          >
-            <option value="all">Balanced</option>
-            <option value="easy">Easy</option>
-            <option value="medium">Medium</option>
-            <option value="hard">Challenging</option>
-          </select>
-
-          <button
-            type="button"
-            onClick={() => fetchQuiz(true)}
-            disabled={isLoading || isRegenerating}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-zinc-700 dark:text-zinc-300 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 transition-colors cursor-pointer disabled:opacity-50"
-            title="Generate a fresh dynamic quiz"
-          >
-            <RefreshCw className={`w-3 h-3 ${isRegenerating ? 'animate-spin text-red-500' : ''}`} />
-            <span className="hidden sm:inline">New Quiz</span>
-          </button>
-        </div>
-      </div>
-
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col items-center scrollbar-thin">
         <div className="max-w-3xl w-full flex-1 flex flex-col justify-between">
@@ -268,111 +276,231 @@ export function QuizPanel({
             </button>
           </div>
         ) : isQuizCompleted ? (
-          /* Quiz Results View */
-          <div className="flex-1 flex flex-col items-center justify-center text-center py-4 px-2 max-w-md mx-auto w-full animate-in fade-in zoom-in-95 duration-200">
-            <div className="w-16 h-16 rounded-3xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4 ring-8 ring-amber-500/5">
-              <Trophy className="w-8 h-8" />
-            </div>
-
-            <h4 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-1">
-              Quiz Completed!
-            </h4>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-5">
-              {percentage >= 80
-                ? 'Outstanding mastery of this video’s core concepts!'
-                : percentage >= 60
-                ? 'Good work! Review missed sections with timestamp links below.'
-                : 'Keep learning! Re-watch key timestamps to strengthen your understanding.'}
-            </p>
-
-            {/* Score Ring / Card */}
-            <div className="w-full bg-zinc-50 dark:bg-zinc-800/60 rounded-2xl p-4 border border-zinc-200/80 dark:border-zinc-700/80 mb-5">
-              <div className="flex items-center justify-around">
-                <div>
-                  <span className="text-3xl font-black text-zinc-900 dark:text-zinc-100">
-                    {score}/{totalQuestions}
+          /* Quiz Results View - Professional Learning Analytics & Review */
+          <div className="flex-1 flex flex-col py-4 px-1 sm:px-4 max-w-2xl mx-auto w-full animate-in fade-in zoom-in-95 duration-200">
+            {/* Header Result Card */}
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-b from-zinc-50 to-white dark:from-zinc-800/80 dark:to-zinc-900 border border-zinc-200/90 dark:border-zinc-700/80 p-6 mb-5 shadow-xs text-center">
+              {/* Radial Accuracy Ring */}
+              <div className="relative w-24 h-24 mx-auto mb-4 flex items-center justify-center">
+                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                  {/* Background Track */}
+                  <path
+                    className="text-zinc-200 dark:text-zinc-700"
+                    strokeWidth="3.2"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                  {/* Progress Fill */}
+                  <path
+                    className={`${
+                      percentage >= 80
+                        ? 'text-emerald-500'
+                        : percentage >= 60
+                        ? 'text-blue-500'
+                        : 'text-amber-500'
+                    } transition-all duration-1000 ease-out`}
+                    strokeDasharray={`${percentage}, 100`}
+                    strokeWidth="3.2"
+                    strokeLinecap="round"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-2xl font-black tracking-tight text-zinc-900 dark:text-zinc-100">
+                    {percentage}%
                   </span>
-                  <span className="block text-[11px] font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mt-0.5">
+                  <span className="text-[9px] uppercase tracking-wider font-semibold text-zinc-400">
+                    Score
+                  </span>
+                </div>
+              </div>
+
+              <h3 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 mb-1">
+                {percentage === 100
+                  ? 'Flawless Mastery!'
+                  : percentage >= 80
+                  ? 'Strong Comprehension!'
+                  : percentage >= 60
+                  ? 'Good Progress!'
+                  : 'Review & Strengthen'}
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-md mx-auto mb-5">
+                {percentage >= 80
+                  ? 'You demonstrated comprehensive understanding of this video’s core concepts.'
+                  : percentage >= 60
+                  ? 'Solid foundation! Review the missed questions below to solidify full retention.'
+                  : 'Key concepts need reinforcement. Re-watch target timestamp clips below to master the material.'}
+              </p>
+
+              {/* Stat Pills */}
+              <div className="grid grid-cols-3 gap-2 sm:gap-3 max-w-md mx-auto pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                <div className="p-2.5 rounded-2xl bg-zinc-100/70 dark:bg-zinc-800/60">
+                  <span className="block text-base font-bold text-zinc-900 dark:text-zinc-100">
+                    {score} / {totalQuestions}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">
                     Correct Answers
                   </span>
                 </div>
-                <div className="h-10 w-px bg-zinc-200 dark:bg-zinc-700" />
-                <div>
+                <div className="p-2.5 rounded-2xl bg-zinc-100/70 dark:bg-zinc-800/60">
                   <span
-                    className={`text-3xl font-black ${
+                    className={`block text-base font-bold ${
                       percentage >= 80
                         ? 'text-emerald-600 dark:text-emerald-400'
-                        : percentage >= 50
-                        ? 'text-amber-600 dark:text-amber-400'
-                        : 'text-red-600 dark:text-red-400'
+                        : percentage >= 60
+                        ? 'text-blue-600 dark:text-blue-400'
+                        : 'text-amber-600 dark:text-amber-400'
                     }`}
                   >
-                    {percentage}%
+                    {percentage >= 80 ? 'Mastery' : percentage >= 60 ? 'Proficient' : 'Learning'}
                   </span>
-                  <span className="block text-[11px] font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mt-0.5">
-                    Accuracy
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">
+                    Performance Tier
+                  </span>
+                </div>
+                <div className="p-2.5 rounded-2xl bg-zinc-100/70 dark:bg-zinc-800/60">
+                  <span className="block text-base font-bold capitalize text-zinc-900 dark:text-zinc-100">
+                    {difficulty}
+                  </span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium">
+                    Difficulty Level
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Summary breakdown of questions */}
-            <div className="w-full space-y-2 mb-6 text-left max-h-48 overflow-y-auto pr-1">
-              {questions.map((q, idx) => {
-                const isCorrect = selectedAnswers[idx] === q.correctOptionIndex;
-                return (
-                  <div
-                    key={q.id}
-                    className="p-2.5 rounded-xl border border-zinc-200/60 dark:border-zinc-800 bg-white dark:bg-zinc-900/50 flex items-start justify-between gap-2"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 mb-1">
-                        {isCorrect ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                        ) : (
-                          <XCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />
-                        )}
-                        <span className="text-xs font-medium text-zinc-900 dark:text-zinc-200 truncate">
-                          Q{idx + 1}: {q.question}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 line-clamp-1">
-                        Correct: {q.options[q.correctOptionIndex]}
-                      </p>
-                    </div>
+            {/* Saved to Profile & Quiz History status */}
+            {user && (
+              <div className="flex items-center justify-between w-full mb-4 px-3.5 py-2 rounded-2xl bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-800/50 text-emerald-900 dark:text-emerald-200 text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="font-medium truncate">
+                    {hasSavedAttempt ? 'Saved to your Quiz History & Analytics' : 'Saving results to history...'}
+                  </span>
+                </div>
+                <a
+                  href="/quiz-history"
+                  className="inline-flex items-center gap-1 font-semibold text-emerald-700 hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200 underline underline-offset-2 shrink-0 ml-2"
+                >
+                  <span>View Analytics</span>
+                  <span>&rarr;</span>
+                </a>
+              </div>
+            )}
 
-                    {q.seconds !== undefined && onSeekToTime && (
-                      <button
-                        type="button"
-                        onClick={() => onSeekToTime(q.seconds!)}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-[10px] font-mono font-medium cursor-pointer shrink-0"
-                      >
-                        <Play className="w-2.5 h-2.5 fill-current" />
-                        <span>{q.timestamp || '0:00'}</span>
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+            {/* Detailed Question Review List */}
+            <div className="w-full space-y-3 mb-6 text-left">
+              <div className="flex items-center justify-between text-xs font-bold text-zinc-700 dark:text-zinc-300 px-1">
+                <span>Detailed Question Review</span>
+                <span className="text-[11px] font-normal text-zinc-400">
+                  {score} of {totalQuestions} correct
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {questions.map((q, idx) => {
+                  const userAnswerIndex = selectedAnswers[idx];
+                  const isCorrect = userAnswerIndex === q.correctOptionIndex;
+                  const userAnswerText =
+                    userAnswerIndex !== undefined ? q.options[userAnswerIndex] : 'Not answered';
+                  const correctAnswerText = q.options[q.correctOptionIndex];
+
+                  return (
+                    <div
+                      key={q.id || idx}
+                      className={`p-4 rounded-2xl border transition-all ${
+                        isCorrect
+                          ? 'bg-white dark:bg-zinc-900/60 border-zinc-200/80 dark:border-zinc-800'
+                          : 'bg-red-50/30 dark:bg-red-950/20 border-red-200/60 dark:border-red-900/40'
+                      }`}
+                    >
+                      {/* Question Header */}
+                      <div className="flex items-start justify-between gap-2.5 mb-2.5">
+                        <div className="flex items-start gap-2 min-w-0 flex-1">
+                          {isCorrect ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                          ) : (
+                            <XCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
+                          )}
+                          <div className="text-xs sm:text-sm font-semibold text-zinc-900 dark:text-zinc-100 leading-snug">
+                            <span className="text-zinc-400 mr-1.5">Q{idx + 1}.</span>
+                            <MarkdownRenderer content={q.question} onSeekToTime={onSeekToTime} inline />
+                          </div>
+                        </div>
+
+                        {q.seconds !== undefined && onSeekToTime && (
+                          <button
+                            type="button"
+                            onClick={() => onSeekToTime(q.seconds!)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-zinc-100 hover:bg-red-50 dark:bg-zinc-800 dark:hover:bg-red-950/50 text-red-600 dark:text-red-400 text-[10px] font-mono font-medium transition-colors cursor-pointer shrink-0 border border-zinc-200/60 dark:border-zinc-700/60"
+                            title={`Jump to video at ${q.timestamp}`}
+                          >
+                            <Play className="w-2.5 h-2.5 fill-current" />
+                            <span>{q.timestamp || '0:00'}</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Answers Comparison */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mb-2.5">
+                        <div
+                          className={`p-2.5 rounded-xl border ${
+                            isCorrect
+                              ? 'bg-emerald-50/60 dark:bg-emerald-950/30 border-emerald-200/60 dark:border-emerald-800/40 text-emerald-900 dark:text-emerald-200'
+                              : 'bg-red-50/60 dark:bg-red-950/30 border-red-200/60 dark:border-red-800/40 text-red-900 dark:text-red-200'
+                          }`}
+                        >
+                          <span className="block text-[10px] font-semibold uppercase tracking-wider opacity-70 mb-1">
+                            Your Selection:
+                          </span>
+                          <MarkdownRenderer content={userAnswerText} onSeekToTime={onSeekToTime} inline />
+                        </div>
+
+                        {!isCorrect && (
+                          <div className="p-2.5 rounded-xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/40 text-emerald-900 dark:text-emerald-200">
+                            <span className="block text-[10px] font-semibold uppercase tracking-wider opacity-70 mb-1">
+                              Correct Answer:
+                            </span>
+                            <MarkdownRenderer content={correctAnswerText} onSeekToTime={onSeekToTime} inline />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Explanation */}
+                      {q.explanation && (
+                        <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200/60 dark:border-zinc-700/50 text-xs text-zinc-700 dark:text-zinc-300 space-y-1">
+                          <span className="font-semibold text-zinc-900 dark:text-zinc-100 block text-[11px]">
+                            Explanation:
+                          </span>
+                          <MarkdownRenderer content={q.explanation} onSeekToTime={onSeekToTime} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Action buttons */}
-            <div className="flex items-center gap-2.5 w-full">
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full sticky bottom-0 bg-white/90 dark:bg-zinc-900/90 backdrop-blur-md pt-3 pb-1 border-t border-zinc-100 dark:border-zinc-800">
               <button
                 type="button"
                 onClick={handleRestartQuiz}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-xs font-semibold bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
+                className="w-full sm:w-1/2 inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-semibold bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 transition-colors cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
-                <span>Retake Quiz</span>
+                <span>Retake This Quiz</span>
               </button>
               <button
                 type="button"
                 onClick={() => fetchQuiz(true)}
-                className="flex-1 inline-flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer shadow-xs"
+                className="w-full sm:w-1/2 inline-flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 text-white transition-colors cursor-pointer shadow-xs"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>New Questions</span>
+                <span>Generate New Questions</span>
               </button>
             </div>
           </div>
@@ -380,30 +508,61 @@ export function QuizPanel({
           /* Active Question View */
           <div className="flex-1 flex flex-col justify-between">
             <div>
-              {/* Question progress & timestamp tag */}
+              {/* Question progress & timestamp tag & actions */}
               <div className="flex items-center justify-between gap-2 mb-3">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold text-red-600 dark:text-red-400 tracking-wider uppercase">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[11px] font-semibold text-red-600 dark:text-red-400 tracking-wider uppercase whitespace-nowrap">
                     Question {currentQuestionIndex + 1} of {totalQuestions}
                   </span>
                   {currentQuestion.difficulty && (
-                    <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                    <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hidden xs:inline">
                       {currentQuestion.difficulty}
                     </span>
                   )}
                 </div>
 
-                {currentQuestion.seconds !== undefined && onSeekToTime && (
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {currentQuestion.seconds !== undefined && onSeekToTime && (
+                    <button
+                      type="button"
+                      onClick={() => onSeekToTime(currentQuestion.seconds!)}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-[10px] font-mono font-medium transition-colors cursor-pointer"
+                      title={`Jump video to timestamp ${currentQuestion.timestamp}`}
+                    >
+                      <Play className="w-2.5 h-2.5 fill-current" />
+                      <span>{currentQuestion.timestamp || '0:00'}</span>
+                    </button>
+                  )}
+
+                  {/* Difficulty selector */}
+                  <select
+                    aria-label="Quiz Difficulty"
+                    value={difficulty}
+                    onChange={(e) => {
+                      const newDiff = e.target.value as QuizDifficulty;
+                      setDifficulty(newDiff);
+                      fetchQuiz(true, newDiff);
+                    }}
+                    disabled={isLoading || isRegenerating}
+                    className="text-[11px] font-medium bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg px-2 py-0.5 focus:outline-none focus:ring-1 focus:ring-red-500 cursor-pointer"
+                  >
+                    <option value="all">Balanced</option>
+                    <option value="easy">Easy</option>
+                    <option value="medium">Medium</option>
+                    <option value="hard">Challenging</option>
+                  </select>
+
                   <button
                     type="button"
-                    onClick={() => onSeekToTime(currentQuestion.seconds!)}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-50 hover:bg-red-100 dark:bg-red-950/40 dark:hover:bg-red-900/60 text-red-600 dark:text-red-400 text-[10px] font-mono font-medium transition-colors cursor-pointer"
-                    title={`Jump video to timestamp ${currentQuestion.timestamp}`}
+                    onClick={() => fetchQuiz(true)}
+                    disabled={isLoading || isRegenerating}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-medium text-zinc-700 dark:text-zinc-300 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 transition-colors cursor-pointer disabled:opacity-50"
+                    title="Generate a fresh dynamic quiz"
                   >
-                    <Play className="w-2.5 h-2.5 fill-current" />
-                    <span>{currentQuestion.timestamp || '0:00'}</span>
+                    <RefreshCw className={`w-3 h-3 ${isRegenerating ? 'animate-spin text-red-500' : ''}`} />
+                    <span className="hidden sm:inline">New Quiz</span>
                   </button>
-                )}
+                </div>
               </div>
 
               {/* Progress Bar */}
@@ -568,7 +727,27 @@ export function QuizPanel({
               )}
             </div>
           </div>
-        ) : null}
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 my-auto">
+            <div className="w-10 h-10 rounded-2xl bg-red-50 dark:bg-red-950/50 flex items-center justify-center text-red-600 dark:text-red-400 mb-3 border border-red-200 dark:border-red-900/50 shadow-2xs">
+              <BrainCircuit className="w-5 h-5" />
+            </div>
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
+              Quiz
+            </h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mb-4">
+              Test your understanding of key insights from this video.
+            </p>
+            <button
+              type="button"
+              onClick={() => fetchQuiz(false)}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Generate Quiz</span>
+            </button>
+          </div>
+        )}
         </div>
       </div>
     </div>

@@ -18,7 +18,6 @@ import { ExternalResourcesPanel } from '@/client/src/components/ExternalResource
 import {
   ArrowLeft,
   Youtube,
-  Sparkles,
   Eye,
   Clock,
   Check,
@@ -349,7 +348,7 @@ export default function VideoDetailPage() {
               id="expand-fullscreen-btn"
               type="button"
               onClick={() => setIsChatFullScreen(true)}
-              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 border border-zinc-200/80 dark:border-zinc-800 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
               title="Expand studio over video on full screen"
             >
               <Maximize2 className="w-3.5 h-3.5" />
@@ -429,12 +428,12 @@ export default function VideoDetailPage() {
                     </div>
                   )}
 
-                  {isRealViews(video?.views) && (
+                  {isRealViews(String(video?.views ?? '')) && (
                     <div className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
                       <Eye className="w-4 h-4 text-zinc-400 shrink-0" />
                       <span>
-                        {video!.views.toLowerCase().includes('views')
-                          ? video!.views
+                        {String(video!.views).toLowerCase().includes('views')
+                          ? String(video!.views)
                           : `${video!.views} views`}
                       </span>
                     </div>
@@ -464,72 +463,37 @@ export default function VideoDetailPage() {
               {/* Clean Workspace Top Header */}
               {isChatFullScreen ? (
                 <header className="h-14 px-4 sm:px-6 border-b border-zinc-200/90 dark:border-zinc-800/90 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md flex items-center justify-between gap-4 shrink-0 shadow-2xs">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {/* Brand Indicator */}
-                    <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 shrink-0">
-                      <Sparkles className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
-                      <span className="text-xs font-bold text-zinc-900 dark:text-white">
-                        VeoChat Studio
+                  {/* Brand Logo & Name */}
+                  <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                    <Link
+                      href="/"
+                      id="fullscreen-home-link"
+                      className="flex items-center gap-2 shrink-0 group hover:opacity-90 transition-opacity"
+                      title="Return to VeoChat Home"
+                    >
+                      <Logo size={28} className="rounded-lg" />
+                      <span className="font-bold text-sm text-zinc-900 dark:text-white tracking-tight">
+                        VeoChat
                       </span>
-                    </div>
-
-                    <div className="h-4 w-px bg-zinc-200 dark:bg-zinc-800 hidden sm:block shrink-0" />
-
-                    {/* Video Info */}
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Youtube className="w-4 h-4 text-red-600 shrink-0" />
-                      <span
-                        className="font-medium text-xs sm:text-sm text-zinc-800 dark:text-zinc-200 truncate max-w-xs sm:max-w-md md:max-w-xl"
-                        title={video?.title}
-                      >
-                        {video?.title || 'Interactive Workspace'}
-                      </span>
-                    </div>
+                    </Link>
                   </div>
 
                   {/* Top Right Controls */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <ThemeToggle id="fullscreen-theme-toggle" />
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <ThemeToggle id="fullscreen-theme-toggle" variant="ghost" />
                     <button
                       id="exit-fullscreen-btn"
                       type="button"
                       onClick={() => setIsChatFullScreen(false)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 active:bg-red-800 text-white transition-colors cursor-pointer shadow-xs"
-                      title="Exit expanded view (Esc)"
+                      className="p-2 rounded-xl text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-red-500/40"
+                      title="Exit full screen (Esc)"
+                      aria-label="Exit full screen"
                     >
-                      <Minimize2 className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Exit Full Screen</span>
-                      <kbd className="hidden md:inline px-1.5 py-0.2 rounded bg-red-700 text-red-100 font-mono text-[10px]">
-                        Esc
-                      </kbd>
+                      <Minimize2 className="w-4 h-4" />
                     </button>
                   </div>
                 </header>
-              ) : (
-                <div className="h-11 px-3.5 border-b border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/50 flex items-center justify-between shrink-0">
-                  <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 rounded-lg bg-red-600/10 text-red-600 dark:text-red-400 flex items-center justify-center">
-                      <Sparkles className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <h2 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                        VeoChat Studio
-                      </h2>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setIsChatFullScreen(true)}
-                      className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-                      title="Expand studio to full screen"
-                    >
-                      <Maximize2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              )}
+              ) : null}
 
               {/* Workspace Body: Responsive Layout Preserving Active View */}
               <div
@@ -567,30 +531,34 @@ export default function VideoDetailPage() {
                         />
                       </div>
 
-                      {video && (
-                        <div className="h-[70px] px-3.5 border-t border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/70 flex items-center shrink-0">
-                          <div className="w-full p-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 flex items-center gap-2.5 shadow-2xs">
-                            {video.thumbnail && (
-                              <div className="relative w-11 h-8 rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800 shrink-0 border border-zinc-200/60 dark:border-zinc-700/60">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={video.thumbnail}
-                                  alt=""
-                                  className="w-full h-full object-cover"
-                                />
-                              </div>
-                            )}
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[11px] font-semibold text-zinc-900 dark:text-zinc-100 truncate leading-tight">
-                                {video.title}
-                              </p>
-                              <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
-                                {video.channel || 'YouTube'}
-                              </p>
-                            </div>
+                      {/* Video Info Card at Bottom of Sidebar (aligned with Chat input bar) */}
+                      <div className="h-[70px] px-3 border-t border-zinc-200/80 dark:border-zinc-800 flex items-center bg-zinc-50/70 dark:bg-zinc-950/70 shrink-0">
+                        <div
+                          id="expanded-sidebar-video-card"
+                          className="w-full flex items-center gap-2.5 p-2 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200/90 dark:border-zinc-800 shadow-2xs min-w-0"
+                        >
+                          <div className="relative w-10 h-10 sm:w-11 sm:h-11 rounded-lg overflow-hidden shrink-0 bg-zinc-100 dark:bg-zinc-800">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={video?.thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`}
+                              alt={video?.title || 'Video thumbnail'}
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-cover rounded-lg"
+                            />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p
+                              className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate"
+                              title={video?.title}
+                            >
+                              {video?.title || 'Interactive Video'}
+                            </p>
+                            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
+                              {video?.channel || 'YouTube Creator'}
+                            </p>
                           </div>
                         </div>
-                      )}
+                      </div>
                     </aside>
 
                     {/* Mobile & Tablet Fullscreen Workspace Tabs (Horizontal on < lg screens) */}
@@ -609,17 +577,28 @@ export default function VideoDetailPage() {
                   </>
                 ) : (
                   /* Workspace Navigation Tabs in Side-by-Side Mode */
-                  <div className="p-1.5 sm:p-2 border-b border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
-                    <WorkspaceTabs
-                      activeTab={activeTab}
-                      onTabChange={setActiveTab}
-                      flashcardCount={flashcardCount}
-                      slideCount={slideCount}
-                      quizCount={quizCount}
-                      recommendationCount={recommendationCount}
-                      resourceCount={resourceCount}
-                      orientation="horizontal"
-                    />
+                  <div className="p-1.5 sm:p-2 border-b border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0 flex items-center justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <WorkspaceTabs
+                        activeTab={activeTab}
+                        onTabChange={setActiveTab}
+                        flashcardCount={flashcardCount}
+                        slideCount={slideCount}
+                        quizCount={quizCount}
+                        recommendationCount={recommendationCount}
+                        resourceCount={resourceCount}
+                        orientation="horizontal"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsChatFullScreen(true)}
+                      className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer shrink-0"
+                      title="Expand studio to full screen"
+                      aria-label="Expand to full screen"
+                    >
+                      <Maximize2 className="w-4 h-4" />
+                    </button>
                   </div>
                 )}
 

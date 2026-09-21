@@ -2,9 +2,10 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMounted } from '@/lib/useIsMounted';
-import { User, LogOut, ChevronDown, CheckCircle2 } from 'lucide-react';
+import { User, LogOut, CheckCircle2, BrainCircuit, Sparkles, Home } from 'lucide-react';
 
 interface UserProfileMenuProps {
   id?: string;
@@ -97,32 +98,24 @@ export function UserProfileMenu({ id = 'user-profile-menu' }: UserProfileMenuPro
         type="button"
         id={`${id}-trigger-btn`}
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 p-1 sm:px-2.5 sm:py-1.5 rounded-xl border border-zinc-200/80 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer text-left shadow-2xs"
-        title="User Profile & Settings"
+        className="flex items-center justify-center p-0.5 rounded-full hover:ring-2 hover:ring-zinc-300 dark:hover:ring-zinc-700 transition-all cursor-pointer focus:outline-none focus:ring-2 focus:ring-red-500/40"
+        title={`Signed in as ${displayName} (${email})`}
+        aria-label="User Profile & Settings"
       >
         {photoURL ? (
           <Image
             src={photoURL}
             alt={displayName}
-            width={28}
-            height={28}
-            className="w-7 h-7 rounded-lg object-cover ring-1 ring-zinc-200 dark:ring-zinc-700"
+            width={32}
+            height={32}
+            className="w-8 h-8 rounded-full object-cover ring-1 ring-zinc-200 dark:ring-zinc-700"
             referrerPolicy="no-referrer"
           />
         ) : (
-          <div className="w-7 h-7 rounded-lg bg-red-600/10 text-red-600 dark:text-red-400 flex items-center justify-center font-bold text-xs">
+          <div className="w-8 h-8 rounded-full bg-red-600/10 text-red-600 dark:text-red-400 flex items-center justify-center font-bold text-xs ring-1 ring-zinc-200 dark:ring-zinc-700">
             {displayName.charAt(0).toUpperCase()}
           </div>
         )}
-        <div className="hidden md:flex flex-col text-left max-w-[120px]">
-          <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">
-            {displayName}
-          </span>
-          <span className="text-[10px] text-zinc-400 dark:text-zinc-500 truncate">
-            {email}
-          </span>
-        </div>
-        <ChevronDown className="w-3.5 h-3.5 text-zinc-400 shrink-0 hidden sm:block" />
       </button>
 
       {/* Dropdown Menu */}
@@ -162,13 +155,47 @@ export function UserProfileMenu({ id = 'user-profile-menu' }: UserProfileMenuPro
 
           {/* Quick Actions */}
           <div className="space-y-1">
+            <Link
+              href="/quiz-history"
+              id={`${id}-quiz-history-link`}
+              onClick={() => setIsOpen(false)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer group"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-6 h-6 rounded-lg bg-red-500/10 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                  <BrainCircuit className="w-3.5 h-3.5" />
+                </div>
+                <span>Quiz History & Analysis</span>
+              </div>
+              <span className="flex items-center gap-1 text-[10px] font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 px-1.5 py-0.5 rounded">
+                <Sparkles className="w-2.5 h-2.5" />
+                Analytics
+              </span>
+            </Link>
+
+            <Link
+              href="/"
+              id={`${id}-home-link`}
+              onClick={() => setIsOpen(false)}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+            >
+              <div className="w-6 h-6 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center shrink-0">
+                <Home className="w-3.5 h-3.5" />
+              </div>
+              <span>Video Studio</span>
+            </Link>
+
+            <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-1" />
+
             <button
               type="button"
               id={`${id}-logout-btn`}
               onClick={handleSignOut}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer text-left"
             >
-              <LogOut className="w-4 h-4 shrink-0" />
+              <div className="w-6 h-6 rounded-lg bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+                <LogOut className="w-3.5 h-3.5" />
+              </div>
               <span>Sign Out</span>
             </button>
           </div>

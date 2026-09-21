@@ -101,7 +101,7 @@ export default function HomePage() {
         );
 
         if (receivedVideos.length > 0) {
-          saveSearchHistory(trimmed, receivedVideos.length);
+          saveSearchHistory(trimmed, receivedVideos, receivedSource);
         }
       } catch (err: unknown) {
         const msg =
@@ -173,8 +173,8 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Header Right: User Profile, Reset, Theme Toggle */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          {/* Header Right: Stored Searches, User Profile, Reset, Theme Toggle */}
+          <div className="flex items-center gap-2 sm:gap-2.5">
             {turns.length > 0 && (
               <button
                 type="button"

@@ -13,13 +13,67 @@
       },
       "subcollections": {
         "searches": {
-          "description": "User conversational video search history",
+          "description": "User conversational video search history with full video data",
           "fields": {
             "id": { "type": "string", "description": "Search item ID" },
             "userId": { "type": "string", "description": "Owning user UID" },
             "query": { "type": "string", "description": "Search query text" },
             "timestamp": { "type": "number", "description": "Search timestamp epoch ms" },
-            "resultsCount": { "type": "number", "description": "Number of videos returned" }
+            "resultsCount": { "type": "number", "description": "Number of videos returned" },
+            "source": { "type": "string", "description": "Source of search results (serpapi or demo)" },
+            "createdAt": { "type": "string", "description": "Search timestamp ISO string" },
+            "videos": {
+              "type": "array",
+              "description": "Complete list of related video items returned for this query",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "title": { "type": "string" },
+                  "thumbnail": { "type": "string" },
+                  "channel": { "type": "string" },
+                  "channelUrl": { "type": "string" },
+                  "views": { "type": "string" },
+                  "duration": { "type": "string" },
+                  "link": { "type": "string" },
+                  "description": { "type": "string" },
+                  "publishedAt": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "quizHistory": {
+          "description": "User saved quiz attempts and performance records",
+          "fields": {
+            "id": { "type": "string", "description": "Quiz attempt ID" },
+            "userId": { "type": "string", "description": "Owning user UID" },
+            "videoId": { "type": "string", "description": "YouTube video ID" },
+            "videoTitle": { "type": "string", "description": "Video title" },
+            "videoChannel": { "type": "string", "description": "Video channel name" },
+            "videoThumbnail": { "type": "string", "description": "Video thumbnail image URL" },
+            "score": { "type": "number", "description": "Number of correctly answered questions" },
+            "totalQuestions": { "type": "number", "description": "Total number of questions in the quiz" },
+            "percentage": { "type": "number", "description": "Score percentage 0-100" },
+            "difficulty": { "type": "string", "description": "Difficulty level chosen" },
+            "timestamp": { "type": "number", "description": "Epoch timestamp in ms" },
+            "createdAt": { "type": "string", "description": "Attempt ISO timestamp string" },
+            "questionsSummary": {
+              "type": "array",
+              "description": "Detailed questions, answers, and timestamp references",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "question": { "type": "string" },
+                  "userAnswer": { "type": "string" },
+                  "correctAnswer": { "type": "string" },
+                  "correct": { "type": "boolean" },
+                  "explanation": { "type": "string" },
+                  "timestamp": { "type": "string" },
+                  "seconds": { "type": "number" }
+                }
+              }
+            }
           }
         }
       }

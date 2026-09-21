@@ -9,8 +9,6 @@ import {
   Copy,
   Check,
   AlertCircle,
-  Maximize2,
-  Minimize2,
   MessageSquare,
   Sparkles,
   ArrowRight,
@@ -103,14 +101,16 @@ export function ChatPanel({
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const setMessages = (update: React.SetStateAction<ChatMessage[]>) => {
+    const next = typeof update === 'function' ? update(messages) : update;
     if (onMessagesChange) {
-      onMessagesChange(update);
+      if (typeof onMessagesChange === 'function') {
+        (onMessagesChange as (val: React.SetStateAction<ChatMessage[]>) => void)(update);
+      }
     }
     setInternalMessages(update);
     // When uncontrolled, write to sessionStorage
     if (!onMessagesChange && typeof window !== 'undefined' && videoId) {
       try {
-        const next = typeof update === 'function' ? update(messages) : update;
         if (next.length > 0) {
           sessionStorage.setItem(`askthevideo_chat_${videoId}`, JSON.stringify(next));
         } else {
@@ -340,55 +340,6 @@ export function ChatPanel({
 
   return (
     <div id="chat-panel-root" className="flex flex-col h-full w-full">
-      {/* Header bar with Expand Fullscreen and Clean Actions */}
-      <div className="h-11 flex items-center justify-between px-3.5 border-b border-zinc-200/80 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-950/40 text-xs shrink-0">
-        <div className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="font-semibold text-xs text-zinc-900 dark:text-zinc-100">
-            Video Chat
-          </span>
-          <span className="text-[11px] text-zinc-400 hidden xs:inline">
-            &bull; Multimodal Grounded
-          </span>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          {/* Expand Full Screen Toggle Button */}
-          {onToggleFullScreen && (
-            <button
-              type="button"
-              onClick={onToggleFullScreen}
-              title={isFullScreen ? 'Exit full screen view' : 'Expand chat over video on full screen'}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors cursor-pointer text-[11px] font-medium"
-            >
-              {isFullScreen ? (
-                <>
-                  <Minimize2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Side-by-Side</span>
-                </>
-              ) : (
-                <>
-                  <Maximize2 className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Full Screen</span>
-                </>
-              )}
-            </button>
-          )}
-
-          {messages.length > 0 && (
-            <button
-              type="button"
-              onClick={handleClearHistory}
-              title="Reset conversation"
-              className="flex items-center gap-1 px-2 py-1 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-zinc-800 text-[11px] transition-colors cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Clear</span>
-            </button>
-          )}
-        </div>
-      </div>
-
       {/* Messages Scroll Area - Full width with no halfway cutoff */}
       <div
         id="chat-messages-container"
@@ -552,8 +503,19 @@ export function ChatPanel({
           e.preventDefault();
           handleSendMessage();
         }}
-        className="w-full h-[70px] px-3.5 sm:px-4 flex items-center border-t border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0"
+        className="w-full h-[70px] px-3.5 sm:px-4 flex items-center gap-2 border-t border-zinc-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0"
       >
+        {messages.length > 0 && (
+          <button
+            id="chat-clear-history-btn"
+            type="button"
+            onClick={handleClearHistory}
+            title="Reset conversation"
+            className="p-2 rounded-xl text-zinc-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 transition-colors cursor-pointer shrink-0"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        )}
         <div className="relative flex items-center w-full">
           <input
             ref={inputRef}
