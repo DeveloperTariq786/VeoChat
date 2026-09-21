@@ -30,7 +30,7 @@ export function SavedSearchesModal({
   id = 'saved-searches-modal',
 }: SavedSearchesModalProps) {
   const router = useRouter();
-  const { user, getSearchHistory, deleteSearchHistoryItem, clearSearchHistory } = useAuth();
+  const { user, signInWithGoogle, getSearchHistory, deleteSearchHistoryItem, clearSearchHistory } = useAuth();
   const [searches, setSearches] = useState<SavedSearchRecord[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [expandedSearchId, setExpandedSearchId] = useState<string | null>(null);
@@ -198,7 +198,35 @@ export function SavedSearchesModal({
 
         {/* Modal Body */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3">
-          {isLoading ? (
+          {!user ? (
+            <div className="py-16 flex flex-col items-center justify-center text-center px-4 max-w-sm mx-auto space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/40 flex items-center justify-center text-red-600 dark:text-red-400">
+                <History className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  Authentication Required
+                </p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                  Sign in with your Google account to access and restore your saved search and chat history across sessions.
+                </p>
+              </div>
+              <button
+                type="button"
+                id="saved-searches-auth-signin-btn"
+                onClick={async () => {
+                  try {
+                    await signInWithGoogle();
+                  } catch (e) {
+                    console.error('Sign in error:', e);
+                  }
+                }}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold bg-red-600 hover:bg-red-700 text-white shadow-xs transition-colors cursor-pointer"
+              >
+                <span>Sign in with Google</span>
+              </button>
+            </div>
+          ) : isLoading ? (
             <div className="py-16 flex flex-col items-center justify-center text-center gap-2.5">
               <Loader2 className="w-7 h-7 text-red-600 dark:text-red-400 animate-spin" />
               <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">

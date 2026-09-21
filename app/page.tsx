@@ -11,7 +11,6 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { Logo } from '@/components/Logo';
 import { VideoItem } from '@/types/video';
 import { isWithinAllowedDuration } from '@/lib/videoDuration';
-import { useIsMounted } from '@/lib/useIsMounted';
 import { useSearchThread, SearchTurn } from '@/lib/searchThreadStore';
 import {
   Sparkles,
@@ -33,9 +32,8 @@ const POPULAR_SUGGESTIONS = [
   'Learn Rust in 1 hour',
 ];
 
-export default function HomePage() {
-  const { user, profile, loading: authLoading, saveSearchHistory } = useAuth();
-  const isMounted = useIsMounted();
+function AuthenticatedSearchWorkspace() {
+  const { user, profile, saveSearchHistory } = useAuth();
   const [turns, setTurns, clearTurns] = useSearchThread();
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -130,24 +128,6 @@ export default function HomePage() {
   const handleClearThread = () => {
     clearTurns();
   };
-
-  // If on landing page view, render LandingPage component
-  if (!isMounted || authLoading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
-        <div className="flex flex-col items-center gap-3">
-          <Logo size={42} className="animate-pulse" priority />
-          <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-            Loading VeoChat...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <LandingPage />;
-  }
 
   const userAvatar = profile?.photoURL || user?.photoURL;
   const userDisplayName =
@@ -327,4 +307,15 @@ export default function HomePage() {
       </div>
     </div>
   );
+}
+
+export default function HomePage() {
+  const { user } = useAuth();
+
+  // Instant static landing page with zero delay for SEO and immediate initial visits
+  if (!user) {
+    return <LandingPage />;
+  }
+
+  return <AuthenticatedSearchWorkspace />;
 }

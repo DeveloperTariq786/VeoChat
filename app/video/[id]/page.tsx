@@ -15,6 +15,7 @@ import { SlideViewer } from '@/client/src/components/SlideViewer';
 import { QuizPanel } from '@/client/src/components/QuizPanel';
 import { RecommendationsPanel } from '@/client/src/components/RecommendationsPanel';
 import { ExternalResourcesPanel } from '@/client/src/components/ExternalResourcesPanel';
+import { AuthGuard } from '@/components/AuthGuard';
 import {
   ArrowLeft,
   Youtube,
@@ -68,7 +69,7 @@ const isRealDescription = (desc?: string) => {
   );
 };
 
-export default function VideoDetailPage() {
+function VideoDetailContent() {
   const params = useParams();
   const router = useRouter();
   const rawId = params?.id;
@@ -191,7 +192,7 @@ export default function VideoDetailPage() {
   }, [videoId]);
 
   useEffect(() => {
-    if (!videoId) return;
+    if (!videoId || !user) return;
 
     let isMounted = true;
 
@@ -233,7 +234,7 @@ export default function VideoDetailPage() {
     return () => {
       isMounted = false;
     };
-  }, [videoId]);
+  }, [videoId, user]);
 
   // Extract or synthesize clean timecode chapters from video metadata
   const chapters: Chapter[] = useMemo(() => {
@@ -677,3 +678,15 @@ export default function VideoDetailPage() {
     </div>
   );
 }
+
+export default function VideoDetailPage() {
+  return (
+    <AuthGuard
+      title="Video Workspace Protected"
+      description="You must be signed in with your Google account to access interactive video workspaces, timestamped chat, and study tools."
+    >
+      <VideoDetailContent />
+    </AuthGuard>
+  );
+}
+
