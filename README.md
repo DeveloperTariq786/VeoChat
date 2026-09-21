@@ -2,6 +2,8 @@
 
 > Transform any YouTube video into an interactive learning and study studio. Chat with timestamp citations, generate 3D flippable flashcards, review visual summary slides, take comprehension quizzes, and discover curated related learning materials.
 
+📖 **Looking for a full step-by-step tutorial?** Check out the [Complete Onboarding & Feature Walkthrough](WALKTHROUGH.md).
+
 ---
 
 ## 🌟 Key Features
