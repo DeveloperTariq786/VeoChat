@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { VideoItem, ChatMessage } from '@/types/video';
+import { recordWatchedVideo } from '@/lib/watchedVideosStore';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { UserProfileMenu } from '@/components/UserProfileMenu';
 import { Logo } from '@/components/Logo';
@@ -235,6 +236,13 @@ function VideoDetailContent() {
       isMounted = false;
     };
   }, [videoId, user]);
+
+  // Record watched video into history for personalized recommendations
+  useEffect(() => {
+    if (video && video.id) {
+      recordWatchedVideo(video);
+    }
+  }, [video]);
 
   // Extract or synthesize clean timecode chapters from video metadata
   const chapters: Chapter[] = useMemo(() => {

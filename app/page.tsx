@@ -13,6 +13,8 @@ import { VideoItem } from '@/types/video';
 import { isWithinAllowedDuration } from '@/lib/videoDuration';
 import { useIsMounted } from '@/lib/useIsMounted';
 import { useSearchThread, SearchTurn } from '@/lib/searchThreadStore';
+import { recordRecentQuery } from '@/lib/watchedVideosStore';
+import { PersonalizedSuggestions } from '@/components/PersonalizedSuggestions';
 import {
   Sparkles,
   User,
@@ -23,15 +25,6 @@ import {
   ArrowRight,
   Info,
 } from 'lucide-react';
-
-const POPULAR_SUGGESTIONS = [
-  'Transformer architecture explained',
-  'Next.js 15 complete course',
-  'How to make cold brew coffee',
-  'System design interview guide',
-  'Deep learning with PyTorch',
-  'Learn Rust in 1 hour',
-];
 
 function AuthenticatedSearchWorkspace() {
   const { user, profile, saveSearchHistory } = useAuth();
@@ -63,6 +56,7 @@ function AuthenticatedSearchWorkspace() {
 
       setTurns((prev) => [...prev, newTurn]);
       setIsSearching(true);
+      recordRecentQuery(trimmed);
 
       try {
         const response = await fetch('/api/search', {
@@ -182,7 +176,7 @@ function AuthenticatedSearchWorkspace() {
       >
         {/* Empty state: Clean conversational prompt if no turns yet */}
         {turns.length === 0 && (
-          <div className="flex-1 flex flex-col items-center justify-center min-h-[50vh] text-center px-4 max-w-xl mx-auto space-y-4 my-auto">
+          <div className="flex-1 flex flex-col items-center justify-center min-h-[50vh] text-center px-4 max-w-3xl mx-auto space-y-4 my-auto">
             <div className="w-10 h-10 rounded-2xl bg-red-600/10 text-red-600 dark:text-red-400 flex items-center justify-center shadow-xs">
               <Search className="w-5 h-5" />
             </div>
@@ -195,25 +189,12 @@ function AuthenticatedSearchWorkspace() {
               </p>
             </div>
 
-            {/* Suggestions centered below the description */}
-            <div className="pt-2 w-full flex flex-col items-center gap-2">
-              <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
-                <Sparkles className="w-3 h-3 text-red-500" />
-                <span>Try searching for:</span>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-lg">
-                {POPULAR_SUGGESTIONS.map((item, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => executeSearch(item)}
-                    disabled={isSearching}
-                    className="px-3 py-1 rounded-full bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200/90 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 text-xs font-medium transition-all shadow-2xs cursor-pointer disabled:opacity-50"
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
+            {/* Personalized or Default Suggestions & Videos */}
+            <div className="pt-2 w-full">
+              <PersonalizedSuggestions
+                onSelectQuery={executeSearch}
+                disabled={isSearching}
+              />
             </div>
           </div>
         )}

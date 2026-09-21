@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Play, Sparkles, Eye, Clock, Loader2 } from 'lucide-react';
 import { VideoItem } from '@/types/video';
+import { recordWatchedVideo } from '@/lib/watchedVideosStore';
 
 interface VideoCardProps {
   video: VideoItem;
@@ -29,6 +30,9 @@ export function VideoCard({ video, id }: VideoCardProps) {
     if (isLoading) return;
 
     setIsLoading(true);
+
+    // Record to user's watched video history for personalized suggestions
+    recordWatchedVideo(video);
 
     // Cache video item in sessionStorage so the video detail page renders immediately with no intermediate loader screen
     try {
