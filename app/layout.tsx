@@ -4,6 +4,7 @@ import 'katex/dist/katex.min.css';
 import './globals.css';
 
 import { Providers } from '@/components/Providers';
+import { Analytics } from '@vercel/analytics/next';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -218,6 +219,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="min-h-screen font-sans bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 antialiased transition-colors duration-200">
         <Providers>{children}</Providers>
+        <Analytics />
       </body>
     </html>
   );
