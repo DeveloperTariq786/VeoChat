@@ -10,12 +10,14 @@ import {
   Globe,
   ChevronLeft,
   ChevronRight,
+  Sparkles,
 } from 'lucide-react';
 
 export type WorkspaceTabType =
   | 'chat'
   | 'flashcards'
   | 'slides'
+  | 'infographics'
   | 'quiz'
   | 'recommendations'
   | 'resources';
@@ -25,6 +27,7 @@ interface WorkspaceTabsProps {
   onTabChange: (tab: WorkspaceTabType) => void;
   flashcardCount?: number;
   slideCount?: number;
+  infographicCount?: number;
   quizCount?: number;
   recommendationCount?: number;
   resourceCount?: number;
@@ -38,6 +41,7 @@ export function WorkspaceTabs({
   onTabChange,
   flashcardCount = 0,
   slideCount = 0,
+  infographicCount = 0,
   quizCount = 0,
   recommendationCount = 0,
   resourceCount = 0,
@@ -80,6 +84,17 @@ export function WorkspaceTabs({
       icon: Presentation,
       badge: slideCount > 0 ? slideCount : undefined,
     },
+    // Infographics tab is temporarily hidden across all screens; underlying code is preserved
+    /*
+    {
+      id: 'infographics',
+      label: 'Infographics',
+      horizontalLabel: 'Infographics',
+      description: 'AI visual summary & concept graphics',
+      icon: Sparkles,
+      badge: infographicCount > 0 ? infographicCount : undefined,
+    },
+    */
     {
       id: 'quiz',
       label: 'Quiz',

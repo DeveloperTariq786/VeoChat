@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { LandingPage } from '@/components/LandingPage';
 import { UserProfileMenu } from '@/components/UserProfileMenu';
@@ -150,6 +151,16 @@ function AuthenticatedSearchWorkspace() {
 
           {/* Header Right: Stored Searches, User Profile, Reset, Theme Toggle */}
           <div className="flex items-center gap-2 sm:gap-2.5">
+            <Link
+              href="/about"
+              id="header-about-link"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+              title="About VeoChat"
+            >
+              <Info className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">About</span>
+            </Link>
+
             {turns.length > 0 && (
               <button
                 type="button"

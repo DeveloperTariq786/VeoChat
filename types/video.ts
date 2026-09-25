@@ -92,6 +92,41 @@ export interface SlidesApiResponse {
   error?: string;
 }
 
+export interface InfographicItem {
+  id: string;
+  stepNumber: number;
+  title: string;
+  caption: string;
+  keyTakeaways: string[];
+  timestamp?: string;
+  seconds?: number;
+  imageUrl?: string;
+  visualPrompt: string;
+  status: 'ready' | 'generating' | 'pending' | 'error';
+  errorMessage?: string;
+}
+
+export interface InfographicsData {
+  title: string;
+  overview: string;
+  items: InfographicItem[];
+  generatedAt?: string;
+}
+
+export interface InfographicsApiResponse {
+  infographics: InfographicsData;
+  source: 'gemini' | 'cache' | 'fallback';
+  model: string;
+  error?: string;
+}
+
+export interface InfographicImageApiResponse {
+  imageUrl?: string;
+  status: 'success' | 'error';
+  model?: string;
+  error?: string;
+}
+
 export interface QuizQuestion {
   id: string;
   question: string;

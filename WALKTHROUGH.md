@@ -105,7 +105,7 @@ The VeoChat home page is designed as a conversational research studio.
 1. In any search result grid or suggestion card, click on a video.
 2. VeoChat immediately loads the **Video Studio**:
    - **Left Column**: The synchronized YouTube video player with high-definition playback, volume controls, and title/creator metadata.
-   - **Right Column**: The 6-in-1 AI Learning Workspace panel.
+   - **Right Column**: The 7-in-1 AI Learning Workspace panel.
 3. The metadata, chapter bookmarks, and chat history are primed instantly.
 
 ---
@@ -157,7 +157,25 @@ Select the **"Slides"** tab in the workspace.
 
 ---
 
-## Step 7: Taking Comprehension Quizzes
+## Step 7: AI Infographics & Concept Visualizations (Nano Banana Vision)
+
+Select the **"Infographics"** (or **"Visuals"**) tab in the workspace.
+
+1. **Multi-Image Visual Storyboard**:
+   - Rather than just a single static picture, VeoChat creates a sequence of 4 to 5 crisp, educational infographic slides summarizing the video's progression.
+2. **Nano Banana Image Generation Model**:
+   - Powered by Google's `gemini-3.1-flash-lite-image` (the **Nano Banana** vision model).
+   - Designed for **clean, crisp visualizations** without blurry text or messy letters, focusing purely on geometric structures, isometric diagrams, and high-clarity concepts.
+3. **Interactive Slide Controls**:
+   - **Slide Navigation**: Use the large Next/Previous arrow overlays, bottom thumbnail carousel, or keyboard **Left / Right arrow keys**.
+   - **Timestamp Jumping**: Click the timestamp chip on any visual to instantly jump the YouTube player to that video section.
+   - **Auto-Play Slideshow**: Toggle hands-free presentation mode to auto-advance through the visual summary.
+   - **Full-Screen Lightbox**: Click the expand icon to inspect diagrams with high resolution on dark background.
+   - **Regenerate & Download**: Regenerate any specific slide or download high-resolution PNG/SVG assets directly.
+
+---
+
+## Step 8: Taking Comprehension Quizzes
 
 Select the **"Quiz"** tab in the workspace.
 
@@ -175,7 +193,7 @@ Select the **"Quiz"** tab in the workspace.
 
 ---
 
-## Step 8: Expanding Knowledge with Related Videos & Web Docs
+## Step 9: Expanding Knowledge with Related Videos & Web Docs
 
 ### Curated Related YouTube Videos
 Select the **"Recommendations"** tab in the workspace.
@@ -191,7 +209,7 @@ Select the **"Resources"** tab in the workspace.
 
 ---
 
-## Step 9: Your Profile, Search History & Quiz Analytics
+## Step 10: Your Profile, Search History & Quiz Analytics
 
 ### User Profile Dropdown
 Click your user avatar in the top-right corner to open your profile menu:

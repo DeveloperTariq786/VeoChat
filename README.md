@@ -24,20 +24,26 @@
 - Highlights key takeaways, core bullets, and chapter milestones.
 - Fullscreen and keyboard-friendly slide navigation.
 
-### 4. Comprehension Quizzes
+### 4. AI Infographics & Multi-Image Storyboard (Nano Banana Model)
+- Generates clean, crisp visual concept graphics and infographic slides summarizing the video.
+- Powered by Google's **Nano Banana** vision model (`gemini-3.1-flash-lite-image`).
+- Designed for pure graphic clarity: sleek 3D isometric structures, flow diagrams, and zero messy text.
+- Full multi-slide carousel navigation, autoplay presentation mode, timestamp seeking, and high-res image download.
+
+### 5. Comprehension Quizzes
 - Dynamic multiple-choice questions testing comprehension of key topics covered in the video.
 - Instant feedback with detailed explanations for correct and incorrect answers.
 - Final score review, analytics, and retake functionality.
 
-### 5. Related YouTube Video Recommendations
+### 6. Related YouTube Video Recommendations
 - Discover relevant YouTube videos on related topics to expand your knowledge.
 - Filter by video duration (`< 10m`, `10m+`) and search query.
 
-### 6. External Web Resources & Links
+### 7. External Web Resources & Links
 - Curated documentation, articles, cheat sheets, and official reference links.
 - Search-grounded web links to deepen understanding beyond the video.
 
-### 7. Google Authentication & Cloud Sync
+### 8. Google Authentication & Cloud Sync
 - Sign in with Google via **Firebase Authentication**.
 - Persistent search history and user session management via **Firebase Firestore**.
 - Smooth theme toggle with Light and Dark mode support.

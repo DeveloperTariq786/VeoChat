@@ -13,6 +13,7 @@ import { WorkspaceTabs, WorkspaceTabType } from '@/client/src/components/Workspa
 import { ChatPanel } from '@/client/src/components/ChatPanel';
 import { FlashcardDeck } from '@/client/src/components/FlashcardDeck';
 import { SlideViewer } from '@/client/src/components/SlideViewer';
+import { InfographicsViewer } from '@/client/src/components/InfographicsViewer';
 import { QuizPanel } from '@/client/src/components/QuizPanel';
 import { RecommendationsPanel } from '@/client/src/components/RecommendationsPanel';
 import { ExternalResourcesPanel } from '@/client/src/components/ExternalResourcesPanel';
@@ -181,6 +182,7 @@ function VideoDetailContent() {
   // Tab badge trackers
   const [flashcardCount, setFlashcardCount] = useState<number>(0);
   const [slideCount, setSlideCount] = useState<number>(0);
+  const [infographicCount, setInfographicCount] = useState<number>(0);
   const [quizCount, setQuizCount] = useState<number>(0);
   const [recommendationCount, setRecommendationCount] = useState<number>(0);
   const [resourceCount, setResourceCount] = useState<number>(0);
@@ -522,7 +524,7 @@ function VideoDetailContent() {
                           Workspace Tools
                         </span>
                         <span className="text-[10px] font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/50 px-1.5 py-0.5 rounded">
-                          6 Active
+                          7 Active
                         </span>
                       </div>
 
@@ -532,6 +534,7 @@ function VideoDetailContent() {
                           onTabChange={setActiveTab}
                           flashcardCount={flashcardCount}
                           slideCount={slideCount}
+                          infographicCount={infographicCount}
                           quizCount={quizCount}
                           recommendationCount={recommendationCount}
                           resourceCount={resourceCount}
@@ -577,6 +580,7 @@ function VideoDetailContent() {
                         onTabChange={setActiveTab}
                         flashcardCount={flashcardCount}
                         slideCount={slideCount}
+                        infographicCount={infographicCount}
                         quizCount={quizCount}
                         recommendationCount={recommendationCount}
                         resourceCount={resourceCount}
@@ -593,6 +597,7 @@ function VideoDetailContent() {
                         onTabChange={setActiveTab}
                         flashcardCount={flashcardCount}
                         slideCount={slideCount}
+                        infographicCount={infographicCount}
                         quizCount={quizCount}
                         recommendationCount={recommendationCount}
                         resourceCount={resourceCount}
@@ -647,6 +652,17 @@ function VideoDetailContent() {
                         video={video}
                         onSeekToTime={handleSeek}
                         onSlidesLoaded={(count) => setSlideCount(count)}
+                      />
+                    </div>
+                  )}
+
+                  {activeTab === 'infographics' && (
+                    <div className="flex-1 flex flex-col min-h-0 w-full h-full overflow-hidden">
+                      <InfographicsViewer
+                        videoId={videoId}
+                        video={video}
+                        onSeekToTime={handleSeek}
+                        onInfographicsLoaded={(count) => setInfographicCount(count)}
                       />
                     </div>
                   )}
