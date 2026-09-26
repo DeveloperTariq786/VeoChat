@@ -5,7 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { useIsMounted } from '@/lib/useIsMounted';
-import { User, LogOut, CheckCircle2, BrainCircuit, Sparkles, Home, Info } from 'lucide-react';
+import { User, LogOut, CheckCircle2, BrainCircuit, Sparkles, Home } from 'lucide-react';
 
 interface UserProfileMenuProps {
   id?: string;
@@ -183,18 +183,6 @@ export function UserProfileMenu({ id = 'user-profile-menu' }: UserProfileMenuPro
                 <Home className="w-3.5 h-3.5" />
               </div>
               <span>Video Studio</span>
-            </Link>
-
-            <Link
-              href="/about"
-              id={`${id}-about-link`}
-              onClick={() => setIsOpen(false)}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-            >
-              <div className="w-6 h-6 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 flex items-center justify-center shrink-0">
-                <Info className="w-3.5 h-3.5" />
-              </div>
-              <span>About VeoChat</span>
             </Link>
 
             <div className="h-px bg-zinc-100 dark:bg-zinc-800 my-1" />

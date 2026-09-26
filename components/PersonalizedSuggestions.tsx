@@ -40,8 +40,9 @@ export function PersonalizedSuggestions({
   disabled = false,
 }: PersonalizedSuggestionsProps) {
   const router = useRouter();
-  const { user, getSearchHistory } = useAuth();
+  const { user, getSearchHistory, loading: authLoading } = useAuth();
 
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS);
   const [isPersonalized, setIsPersonalized] = useState<boolean>(false);
   const [suggestedVideos, setSuggestedVideos] = useState<VideoItem[]>([]);
@@ -65,7 +66,16 @@ export function PersonalizedSuggestions({
   useEffect(() => {
     let isCancelled = false;
 
+    // While auth state is initializing, wait for it before loading
+    if (authLoading) {
+      return;
+    }
+
     const executeLoad = async () => {
+      await Promise.resolve();
+      if (isCancelled) return;
+      setIsLoading(true);
+
       try {
         // Collect local recent queries and watched videos
         const localQueries = getRecentQueries();
@@ -121,8 +131,6 @@ export function PersonalizedSuggestions({
 
         const aggregatedVideos = Array.from(allVideosMap.values()).slice(0, 4);
 
-        // Defer state update to next microtask so it is strictly asynchronous
-        await Promise.resolve();
         if (isCancelled) return;
 
         setSuggestedVideos(aggregatedVideos);
@@ -132,6 +140,7 @@ export function PersonalizedSuggestions({
           setSuggestions(DEFAULT_SUGGESTIONS);
           setIsPersonalized(false);
           setRecentTopic('');
+          setIsLoading(false);
           return;
         }
 
@@ -147,7 +156,9 @@ export function PersonalizedSuggestions({
           if (cached) {
             const parsed = JSON.parse(cached);
             if (Array.isArray(parsed) && parsed.length > 0) {
+              if (isCancelled) return;
               setSuggestions(parsed);
+              setIsLoading(false);
               return;
             }
           }
@@ -179,6 +190,10 @@ export function PersonalizedSuggestions({
         }
       } catch (err) {
         console.warn('Error fetching personalized suggestions:', err);
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
       }
     };
 
@@ -187,7 +202,7 @@ export function PersonalizedSuggestions({
     return () => {
       isCancelled = true;
     };
-  }, [user, getSearchHistory, historyVersion]);
+  }, [user, authLoading, getSearchHistory, historyVersion]);
 
   // Handle direct navigation to a suggested video
   const handleVideoClick = (video: VideoItem, e: React.MouseEvent) => {
@@ -207,8 +222,79 @@ export function PersonalizedSuggestions({
       ? suggestions
       : DEFAULT_SUGGESTIONS;
 
+  // Shimmer skeleton loading state while determining or fetching suggestions & videos
+  if (isLoading || authLoading) {
+    return (
+      <div className="w-full flex flex-col items-center gap-4 text-center animate-in fade-in duration-200">
+        {/* Shimmer header label */}
+        <div className="flex items-center gap-2 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
+          <div className="w-3.5 h-3.5 rounded-full bg-zinc-200 dark:bg-zinc-800 relative overflow-hidden">
+            <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-zinc-600/40 to-transparent" />
+          </div>
+          <div className="h-3 w-40 sm:w-48 rounded-full bg-zinc-200 dark:bg-zinc-800 relative overflow-hidden">
+            <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-zinc-600/40 to-transparent" />
+          </div>
+        </div>
+
+        {/* Shimmer Suggestion Chips */}
+        <div className="flex flex-wrap items-center justify-center gap-2 max-w-xl">
+          {[140, 180, 120, 160, 130, 150].map((width, idx) => (
+            <div
+              key={idx}
+              style={{ width: `${width}px` }}
+              className="h-7 sm:h-8 rounded-full bg-zinc-200/90 dark:bg-zinc-800/90 relative overflow-hidden border border-zinc-200/60 dark:border-zinc-800/60 shadow-2xs"
+            >
+              <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-zinc-600/40 to-transparent" />
+            </div>
+          ))}
+        </div>
+
+        {/* Shimmer Video Shelf */}
+        <div className="w-full max-w-3xl mt-4 pt-4 border-t border-zinc-200/60 dark:border-zinc-800/60 text-left">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <div className="flex items-center gap-2">
+              <div className="w-3.5 h-3.5 rounded-md bg-zinc-200 dark:bg-zinc-800 relative overflow-hidden">
+                <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-zinc-600/40 to-transparent" />
+              </div>
+              <div className="h-3.5 w-36 sm:w-44 rounded bg-zinc-200 dark:bg-zinc-800 relative overflow-hidden">
+                <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-zinc-600/40 to-transparent" />
+              </div>
+            </div>
+            <div className="h-3 w-20 rounded bg-zinc-200/70 dark:bg-zinc-800/70 relative overflow-hidden">
+              <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-zinc-600/40 to-transparent" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {[1, 2].map((i) => (
+              <div
+                key={i}
+                className="flex items-center gap-3 p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200/70 dark:border-zinc-800/70 shadow-2xs"
+              >
+                {/* 16:9 Thumbnail skeleton */}
+                <div className="relative w-24 sm:w-28 aspect-video shrink-0 rounded-lg bg-zinc-200 dark:bg-zinc-800 overflow-hidden">
+                  <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-zinc-600/40 to-transparent" />
+                </div>
+
+                {/* Info lines */}
+                <div className="flex-1 space-y-2 py-0.5">
+                  <div className="h-3.5 bg-zinc-200 dark:bg-zinc-800 rounded w-11/12 relative overflow-hidden">
+                    <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-zinc-600/40 to-transparent" />
+                  </div>
+                  <div className="h-3 bg-zinc-200/80 dark:bg-zinc-800/80 rounded w-2/3 relative overflow-hidden">
+                    <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 dark:via-zinc-600/40 to-transparent" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="w-full flex flex-col items-center gap-4 text-center">
+    <div className="w-full flex flex-col items-center gap-4 text-center animate-in fade-in duration-300">
       {/* Tab Switcher if user is personalized */}
       {isPersonalized && (
         <div className="inline-flex items-center p-1 bg-zinc-100 dark:bg-zinc-800/80 rounded-full border border-zinc-200/80 dark:border-zinc-700/60 shadow-2xs">

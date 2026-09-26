@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { Logo } from '@/components/Logo';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -170,12 +169,6 @@ export function LandingPage() {
             >
               FAQ
             </a>
-            <Link
-              href="/about"
-              className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
-            >
-              About
-            </Link>
           </nav>
 
           {/* Right: Sign in with Google & ThemeToggle */}
@@ -729,9 +722,6 @@ export function LandingPage() {
             <a href="#faq" className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors">
               FAQ
             </a>
-            <Link href="/about" className="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors">
-              About
-            </Link>
           </div>
           <p className="text-zinc-400 dark:text-zinc-500">
             &copy; {new Date().getFullYear()} VeoChat. All rights reserved.
